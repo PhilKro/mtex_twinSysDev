@@ -8,7 +8,7 @@ function SF = SchmidFactor(tS,sigma,varargin)
 %   SF = SchmidFactor(sS,sigma,'relative')
 %
 % Input
-%  tS - list of @twinningSystem
+%  tS - list of @twinSystem
 %  v  - @vector3d list of tension direction
 %  sigma - @stressTensor
 %

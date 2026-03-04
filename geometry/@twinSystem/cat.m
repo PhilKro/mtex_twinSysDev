@@ -9,11 +9,11 @@ function tS = cat(dim,varargin)
 %  tS1, tS2, tS3 - @slipSystem
 %
 % Output
-%  tS - @twinningSystem
+%  tS - @twinSystem
 %
 % See also
 %TODO
-% twinningSystem/horzcat, twinningSystem/vertcat
+% twinSystem/horzcat, twinSystem/vertcat
 
 % remove emtpy arguments
 varargin(cellfun('isempty',varargin)) = [];

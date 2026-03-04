@@ -1,7 +1,7 @@
 function tS = subsasgn(tS,s,value)
 % overloads subsasgn
 
-if ~isa(tS,'twinningSystem') && ~isempty(value)
+if ~isa(tS,'twinSystem') && ~isempty(value)
   tS = value;
   tS.b.x = [];
   tS.b.y = [];
