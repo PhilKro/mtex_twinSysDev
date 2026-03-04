@@ -7,7 +7,7 @@ if strcmp(tS.CS.char(),'"6/mmm"')
 elseif strcmp(tS.CS.char(),'"m-3m"')
     cS = crystalShape.cube(tS.CS);
 else
-    disp('Do not have a crystal shape for this symmetry, please define yourself in @twinningSystem/plotShape'); 
+    disp('Do not have a crystal shape for this symmetry, please define yourself in @twinSystem/plotShape'); 
     return
 end
 

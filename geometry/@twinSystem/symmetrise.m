@@ -7,11 +7,11 @@ function [tS,id] = symmetrise(tS,varargin)
 %   [tSAll,id] = symmetrise(tS)
 %
 % Input
-%  tS - @twinningSystem
+%  tS - @twinSystem
 %
 % Output
-%  tS - @twinningSystem
-%  id    - id of the twinningSystem before symmetrisation
+%  tS - @twinSystem
+%  id    - id of the twinSystem before symmetrisation
 %
 %% 
 

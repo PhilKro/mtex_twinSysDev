@@ -11,7 +11,7 @@ classdef twinSystem
     end
 
     methods
-        function tS = twinningSystem(rotAxis, k1, eta1, k2, eta2, CS, CRSS, type)
+        function tS = twinSystem(rotAxis, k1, eta1, k2, eta2, CS, CRSS, type)
             if nargin > 0
                 tS.rotAxis = rotAxis;
                 tS.k1 = k1;
@@ -43,6 +43,7 @@ classdef twinSystem
                 % Automatically set to compound if S is a mirror plane
                 if tS.isCompound
                     tS.twinType = 'Compound';
+                    %% TODO CHECK FOR ALLOWED PLANES AND DIRECTIONS FOR THE TWIN ELEMENTS BASED ON THE TWIN TYPE+
                 end
             end
         end
@@ -97,13 +98,20 @@ classdef twinSystem
             isC = isMirror(S);
         end
 
+        function nTS = mtimes(tS1, tS2)
+            % Overloads the * operator to create a nestedTwinSystem
+            % This allows for syntax like: doubleTwin = twin1 * twin2;
+            nTS = nestedTwinSystem(tS1, tS2);
+        end
+
+Once you have that method in both classes, MATLAB will seamlessly handle everything. You will be able to type `t3 = t1 * t2` to get a double twin, and then `t4 = t3 * t1` to get a tertiary twin, all without changing any syntax!
         function misori = parentTwinMisorientation(tS)
             % The misorientation depends on the twin type.
             switch tS.twinType
                 case {'Type I', 'Compound'}
                     % Type I twin is defined by a reflection in the K1 plane.
                     % For centrosymmetric crystals, this is equivalent to a 180-degree rotation about the normal to K1.
-                    misori = -rotation.byAxisAngle(tS.k1, pi);
+                    misori = rotation.byAxisAngle(tS.k1, pi);
                 case 'Type II'
                     % Type II twin is defined by a 180-degree rotation about eta1.
                     misori = rotation.byAxisAngle(tS.eta1, pi);
@@ -194,7 +202,7 @@ classdef twinSystem
             rotAxis = cross(k1, eta2);
             eta1 = cross(k1, rotAxis);
             k2 = cross(eta2, rotAxis);
-            tS = twinningSystem(rotAxis, k1, eta1, k2, eta2, k1.CS, 1, type);
+            tS = twinSystem(rotAxis, k1, eta1, k2, eta2, k1.CS, 1, type);
             
             shearvec = 2 * (tS.k1.normalize - dot(tS.eta2.normalize, tS.k1.normalize).^-1 * tS.eta2.normalize);
             assert(dot(shearvec, tS.eta1, 'noSymmetry') > 0, "Something went wrong in the definition of the twin system: eta1 has the wrong sense. Sense of shear will not be correct")
@@ -208,7 +216,7 @@ classdef twinSystem
             k1.dispStyle = 'hkil';
             eta2 = cross(rotAxis, k2);
             eta2.dispStyle = 'UVTW';
-            tS = twinningSystem(rotAxis, k1, eta1, k2, eta2, k2.CS, 1, type);
+            tS = twinSystem(rotAxis, k1, eta1, k2, eta2, k2.CS, 1, type);
             
             shearvec = 2 * (tS.k1.normalize - dot(tS.eta2.normalize, tS.k1.normalize).^-1 * tS.eta2.normalize);
             assert(dot(shearvec, tS.eta1, 'noSymmetry') > 0, "Something went wrong in the definition of the twin system: eta1 has the wrong sense. Sense of shear will not be correct")
@@ -224,7 +232,7 @@ classdef twinSystem
                 eta2 = k1;
                 eta2.dispStyle = 'UVTW';
                 disp(append(newline, 'Chose a set of values for K2 and eta2!'))
-                tS = twinningSystem(rotAxis, k1, eta1, k2, eta2, k1.CS, 1, type);
+                tS = twinSystem(rotAxis, k1, eta1, k2, eta2, k1.CS, 1, type);
             else
                 error("k1 and rotAxis have to be orthogonal")
             end
@@ -232,7 +240,7 @@ classdef twinSystem
 
         function tS = hexagonal_110K(K, CS)
             if CS.lattice == 6
-                tS = arrayfun(@(x_int) twinningSystem.byK1rotAxis(Miller({1, 0, -1, x_int}, CS), Miller({1, -2, 1, 0}, CS, 'UVTW'), 'Type II'), K);
+                tS = arrayfun(@(x_int) twinSystem.byK1rotAxis(Miller({1, 0, -1, x_int}, CS), Miller({1, -2, 1, 0}, CS, 'UVTW'), 'Type II'), K);
             else
                 disp("Provide a hexagonal CS for this method")
             end
@@ -240,7 +248,7 @@ classdef twinSystem
 
         function tS = hexagonal_211K(K, CS)
             if CS.lattice == 6
-                tS = arrayfun(@(x_int) twinningSystem.byK1rotAxis(Miller({1, 1, -2, x_int}, CS), Miller({1, -1, 0, 0}, CS, 'UVTW'), 'Type II'), K);
+                tS = arrayfun(@(x_int) twinSystem.byK1rotAxis(Miller({1, 1, -2, x_int}, CS), Miller({1, -1, 0, 0}, CS, 'UVTW'), 'Type II'), K);
             else
                 disp("Provide a hexagonal CS for this method")
             end
@@ -248,7 +256,7 @@ classdef twinSystem
 
         function tS = hexagonal_1012_1012(CS)
             if CS.lattice == 6
-                tS = twinningSystem.byK2eta1(Miller(-1, 0, 1, 2, CS), Miller(-1, 0, 1, 1, CS, 'UVTW'), 'Type I');
+                tS = twinSystem.byK2eta1(Miller(-1, 0, 1, 2, CS), Miller(-1, 0, 1, 1, CS, 'UVTW'), 'Type I');
             else
                 disp("Provide a hexagonal CS for this method")
             end
@@ -256,7 +264,7 @@ classdef twinSystem
 
         function tS = hexagonal_1122_0001(CS)
             if CS.lattice == 6
-                tS = twinningSystem.byK2eta1(Miller(0, 0, 0, 1, CS), Miller(-1, -1, 2, 3, CS, 'UVTW'), 'Type I');
+                tS = twinSystem.byK2eta1(Miller(0, 0, 0, 1, CS), Miller(-1, -1, 2, 3, CS, 'UVTW'), 'Type I');
             else
                 disp("Provide a hexagonal CS for this method")
             end
@@ -264,7 +272,7 @@ classdef twinSystem
 
         function tS = hexagonal_1101_1013(CS)
             if CS.lattice == 6
-                tS = twinningSystem.byK2eta1(Miller(1, 0, -1, -3, CS), Miller(1, 0, -1, -2, CS, 'UVTW'), 'Type I');
+                tS = twinSystem.byK2eta1(Miller(1, 0, -1, -3, CS), Miller(1, 0, -1, -2, CS, 'UVTW'), 'Type I');
             else
                 disp("Provide a hexagonal CS for this method")
             end
@@ -272,7 +280,7 @@ classdef twinSystem
 
         function tS = hexagonal_1122_1124(CS)
             if CS.lattice == 6
-                tS = twinningSystem.byK2eta1(Miller(1, 1, -2, -4, CS), Miller(1, 1, -2, -3, CS, 'UVTW'), 'Type I');
+                tS = twinSystem.byK2eta1(Miller(1, 1, -2, -4, CS), Miller(1, 1, -2, -3, CS, 'UVTW'), 'Type I');
             else
                 disp("Provide a hexagonal CS for this method")
             end
@@ -280,7 +288,7 @@ classdef twinSystem
         
         function tS = hexagonal_1124_1122(CS)
             if CS.lattice == 6
-                tS = twinningSystem.byK2eta1(Miller(1, 1, -2, -2, CS), Miller(2, 2, -4, -3, CS, 'UVTW'), 'Type I');
+                tS = twinSystem.byK2eta1(Miller(1, 1, -2, -2, CS), Miller(2, 2, -4, -3, CS, 'UVTW'), 'Type I');
             else
                 disp("Provide a hexagonal CS for this method")
             end
@@ -288,7 +296,7 @@ classdef twinSystem
 
         function tS = hexagonal_1121_0001(CS)
             if CS.lattice == 6
-                tS = twinningSystem.byK2eta1(Miller(0, 0, 0, 1, CS), Miller(-1, -1, 2, 6, CS, 'UVTW'), 'Type I');
+                tS = twinSystem.byK2eta1(Miller(0, 0, 0, 1, CS), Miller(-1, -1, 2, 6, CS, 'UVTW'), 'Type I');
             else
                 disp("Provide a hexagonal CS for this method")
             end
