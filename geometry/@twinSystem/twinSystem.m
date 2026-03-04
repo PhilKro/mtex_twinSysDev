@@ -98,13 +98,6 @@ classdef twinSystem
             isC = isMirror(S);
         end
 
-        function nTS = mtimes(tS1, tS2)
-            % Overloads the * operator to create a nestedTwinSystem
-            % This allows for syntax like: doubleTwin = twin1 * twin2;
-            nTS = nestedTwinSystem(tS1, tS2);
-        end
-
-Once you have that method in both classes, MATLAB will seamlessly handle everything. You will be able to type `t3 = t1 * t2` to get a double twin, and then `t4 = t3 * t1` to get a tertiary twin, all without changing any syntax!
         function misori = parentTwinMisorientation(tS)
             % The misorientation depends on the twin type.
             switch tS.twinType
@@ -193,6 +186,11 @@ Once you have that method in both classes, MATLAB will seamlessly handle everyth
                 d(abs(d) < 1e-10) = 0;
                 cprintf(d, '-L', '  ', '-Lc', {'x' 'y' 'z' ' |   x' 'y' 'z'});
             end
+        end
+        function nTS = mtimes(tS1, tS2)
+            % Overloads the * operator to create a nestedTwinSystem
+            % This allows for syntax like: doubleTwin = twin1 * twin2;
+            nTS = nestedTwinSystem(tS1, tS2);
         end
     end
 
