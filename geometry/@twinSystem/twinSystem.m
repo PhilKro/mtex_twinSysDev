@@ -7,6 +7,7 @@ classdef twinSystem
         k2       % Conjugate twin plane
         rotAxis  % Zone axis
         twinType % Type of twin: 0:'Compound', 1:'Type I' or 2:'Type II'
+        parent   % Parent object (orientation, grain2d, or twinSystem)
         
     end
 
@@ -231,10 +232,83 @@ classdef twinSystem
                 cprintf(d, '-L', '  ', '-Lc', {'x' 'y' 'z' ' |   x' 'y' 'z'});
             end
         end
-        function nTS = mtimes(tS1, tS2)
-            % Overloads the * operator to create a nestedTwinSystem
-            % This allows for syntax like: doubleTwin = twin1 * twin2;
-            nTS = nestedTwinSystem(tS1, tS2);
+
+        function tS = mtimes(A, B)
+            %MTIMES implement multiplication for twinSystem
+            %
+            % Syntax
+            %   tS_nested = tS1 * tS2
+            %   tS_active = ori * tS
+            %   tS_active = grains * tS
+            
+            if isa(A, 'twinSystem') && isa(B, 'twinSystem')
+                % Nesting: A is the parent of B
+                parentObj = A(:);
+                childObj = B(:);
+            elseif (isa(A, 'orientation') || isa(A, 'grain2d')) && isa(B, 'twinSystem')
+                % Activation: A is the root parent
+                parentObj = A(:);
+                childObj = B(:);
+            else
+                tS = builtin('mtimes', A, B);
+                return;
+            end
+            
+            nParent = numel(parentObj);
+            nChild = numel(childObj);
+            
+            % Expand child (inner loop) -> [C1; C2; C1; C2]
+            tS = repmat(childObj, nParent, 1);
+            
+            % Expand parent (outer loop) -> [P1; P1; P2; P2]
+            % Use indexing for robustness with object arrays
+            idx = kron(1:nParent, ones(1, nChild)).';
+            parentsExpanded = parentObj(idx);
+            
+            % Assign parents
+            if nParent * nChild > 0
+                pCell = num2cell(parentsExpanded);
+                [tS.parent] = pCell{:};
+            end
+        end
+
+        function ori = orientation(tS)
+            % ORIENTATION Calculate the twin orientation in specimen coordinates
+            
+            if isempty(tS), ori = orientation.empty; return; end
+            
+            % Check if parents are defined (handle object arrays safely)
+            parentsCell = {tS.parent};
+            if all(cellfun('isempty', parentsCell))
+                warning('twinSystem:orientation:noParent', ...
+                    'Parent orientation is not defined for any twin system in the array. Returning NaN orientations.');
+                ori = orientation.nan(tS.CS,size(tS)); 
+                return; 
+            end
+
+            % Recursively resolve parent orientation
+            % This concatenation will fail if parents are of mixed types (e.g. grain and orientation)
+            % which is desired behavior as we can't process mixed types easily.
+            parents = [tS.parent];
+            
+            if numel(parents) ~= numel(tS)
+                error('twinSystem:orientation:missingParent', ...
+                    'Parent orientation is not defined for all twin systems in the array.');
+            end
+
+            if isa(parents, 'twinSystem')
+                pOri = orientation(parents);
+            elseif isa(parents, 'grain2d')
+                pOri = parents.meanOrientation;
+            else
+                pOri = parents;
+            end
+            
+            % Reshape pOri to match tS dimensions
+            pOri = reshape(pOri, size(tS));
+
+            % Apply misorientation (Parent -> Twin)
+            ori = pOri .* tS.parentTwinMisorientation;
         end
 
         function n = length(tS)
@@ -259,6 +333,7 @@ classdef twinSystem
             if tS1.CS ~= tS2.CS, l = false; return; end
             
             %% CHECK IF CORRECT
+            warning('TODO: check if the implementation of twinSystem/eq is correct.')
             ops = tS1.CS.quaternion;
             l = any( (ops * tS1.k1) == tS2.k1 & (ops * tS1.eta1) == tS2.eta1 );
         end
