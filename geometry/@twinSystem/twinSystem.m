@@ -116,20 +116,20 @@ classdef twinSystem
 
         function misori = parentTwinMisorientation(tS)
             % The misorientation depends on the twin type.
-            misori = rotation.nan(size(tS));
+            misori = orientation.nan(tS.CS, tS.CS, size(tS));
 
             % Type I (1) and Compound (0)
             isType1OrCompound = tS.twinType == 1 | tS.twinType == 0;
             if any(isType1OrCompound)
                 % Type I twin is defined by a reflection in the K1 plane.
                 % For centrosymmetric crystals, this is equivalent to a 180-degree rotation about the normal to K1.
-                misori(isType1OrCompound) = rotation.byAxisAngle(tS.k1(isType1OrCompound), pi);
+                misori(isType1OrCompound) = -orientation.byAxisAngle(tS.k1(isType1OrCompound), pi);
             end
             % Type II (2)
             isType2 = tS.twinType == 2;
             if any(isType2)
                 % Type II twin is defined by a 180-degree rotation about eta1.
-                misori(isType2) = rotation.byAxisAngle(tS.eta1(isType2), pi);
+                misori(isType2) = orientation.byAxisAngle(tS.eta1(isType2), pi);
             end
         end
 
@@ -245,37 +245,75 @@ classdef twinSystem
                 % Nesting: A is the parent of B
                 parentObj = A(:);
                 childObj = B(:);
+                
+                nParent = numel(parentObj);
+                nChild = numel(childObj);
+                
+                % Expand child (inner loop) -> [C1; C2; C1; C2]
+                tS = repmat(childObj, nParent, 1);
+                
+                % Expand parent (outer loop) -> [P1; P1; P2; P2]
+                % Use indexing for robustness with object arrays
+                idx = kron(1:nParent, ones(1, nChild)).';
+                parentsExpanded = parentObj(idx);
+                
+                % Assign parents
+                if nParent * nChild > 0
+                    tS.parent = parentsExpanded;
+                end
+                
             elseif (isa(A, 'orientation') || isa(A, 'grain2d')) && isa(B, 'twinSystem')
                 % Activation: A is the root parent
-                parentObj = A(:);
-                childObj = B(:);
+                tS = activate(B, A);
             else
                 tS = builtin('mtimes', A, B);
                 return;
             end
+        end
+
+        function tS = activate(tS, parentObj)
+            % ACTIVATE Attach a parent (orientation/grain) to the twin system
+            %
+            % Syntax
+            %   tS = activate(tS, parentObj)
+           
+            if ~ eq(parentObj.CS, tS.CS)
+                error('twinSystem:activate:incompatibleCS', ...
+                    'The crystal symmetry of the parent orientation/grain must match that of the twin system.');
+            end
+
+            if ~isa(parentObj, 'grain2d')
+                parentObj = parentObj(:);
+            end
+            childObj = tS(:);
             
             nParent = numel(parentObj);
+            if isa(parentObj, 'twinSystem')
+                nParent = numel(parentObj.eta1);
+            end
+
             nChild = numel(childObj);
+            if isa(childObj, 'twinSystem')
+                nChild = numel(childObj.eta1);
+            end
             
             % Expand child (inner loop) -> [C1; C2; C1; C2]
             tS = repmat(childObj, nParent, 1);
             
             % Expand parent (outer loop) -> [P1; P1; P2; P2]
-            % Use indexing for robustness with object arrays
             idx = kron(1:nParent, ones(1, nChild)).';
             parentsExpanded = parentObj(idx);
             
             % Assign parents
             if nParent * nChild > 0
-                pCell = num2cell(parentsExpanded);
-                [tS.parent] = pCell{:};
+                tS.parent = parentsExpanded;
             end
         end
 
         function ori = orientation(tS)
             % ORIENTATION Calculate the twin orientation in specimen coordinates
             
-            if isempty(tS), ori = orientation.empty; return; end
+            if isempty(tS),warning('twinSystem:orientation:empty', 'Your twin system is empty.'); ori = []; return; end
             
             % Check if parents are defined (handle object arrays safely)
             parentsCell = {tS.parent};
@@ -291,7 +329,7 @@ classdef twinSystem
             % which is desired behavior as we can't process mixed types easily.
             parents = [tS.parent];
             
-            if numel(parents) ~= numel(tS)
+            if numel(parents) ~= numel(tS.eta1)
                 error('twinSystem:orientation:missingParent', ...
                     'Parent orientation is not defined for all twin systems in the array.');
             end
@@ -314,6 +352,13 @@ classdef twinSystem
         function n = length(tS)
             n = length(tS.k1);
         end
+
+        % function n = numel(tS,varargin)
+        %uncommenting this breaks the logic for some reason if you have a
+        %nx1 twin system tS.parent calls this and then it fails in subsref
+        %whatevs
+        %     n = numel(tS.k1,varargin{:});
+        % end
 
         function varargout = size(tS,varargin)
             [varargout{1:nargout}] = size(tS.k1,varargin{:});

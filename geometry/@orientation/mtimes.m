@@ -29,6 +29,10 @@ elseif isa(b,'symmetry')
   % orientation times symmetry
   r = mtimes@quaternion(a,b.rot,0);
   return
+elseif isa(b,'twinSystem')
+  % orientation times twinSystem -> activate twinSystem
+  r = activate(b,a);
+  return
 elseif ~isa(b,'quaternion') 
   r = rotate_outer(b,a);
   return 
