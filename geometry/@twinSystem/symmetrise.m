@@ -1,5 +1,5 @@
 function [tSsym,id] = symmetrise(tS,varargin)
-% find all symmetrically equivalent slips systems
+% find all symmetrically equivalent twin systems
 %
 % Syntax
 %
@@ -43,12 +43,15 @@ for i = 1:length(tS)
     rotAxis_s = cross(eta1_s,k1_s);
     eta2_s = cross(rotAxis_s,k2_s);
     
-    tSsym = twinSystem();
-    for j = 1:length(eta1_s)
-        tSsym(j,1) = twinSystem(rotAxis_s(j), k1_s(j), eta1_s(j), k2_s(j), eta2_s(j), tS(i).CRSS);
+    tS_new = twinSystem(rotAxis_s, k1_s, eta1_s, k2_s, eta2_s, repmat(tS(i).CRSS,length(eta1_s),1), repmat(tS(i).twinType,length(eta1_s),1));
+    
+    if i == 1
+        tSsym = tS_new;
+    else
+        tSsym = [tSsym; tS_new];
     end
     
-    id = [id; repmat(i, length(tSsym), 1)];
+    id = [id; repmat(i, length(tS_new), 1)];
 end
 
 end
