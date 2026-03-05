@@ -123,6 +123,8 @@ classdef twinSystem
             if any(isType1OrCompound)
                 % Type I twin is defined by a reflection in the K1 plane.
                 % For centrosymmetric crystals, this is equivalent to a 180-degree rotation about the normal to K1.
+                warning('twinSystem:parentTwinMisorientation:type1Assumption', ...
+                    'The current implementation works with an improper rotation here. This might not work for the orientation analysis. Maybe the proper rotation should be implemented here aswell/instead?');
                 misori(isType1OrCompound) = -orientation.byAxisAngle(tS.k1(isType1OrCompound), pi);
             end
             % Type II (2)
