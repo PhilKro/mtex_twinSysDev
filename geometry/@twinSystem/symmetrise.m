@@ -24,19 +24,36 @@ id = [];
 
 for i = 1:length(tS)
     
-    s = tS(i).CS.quaternion; % symmetry operations
-    if check_option(varargin,'antipodal'), s = [s;-s];end
+    s = tS(i).CS.quaternion; % all proper symmetry operations
+    
+    symcheck = s * tS(i).eta1;
+
+    if ~(check_option(varargin,'antipodal')) 
+        [~, unique_idx] = unique(symcheck, 'antipodal', 'noSymmetry', 'stable');
+    else
+        % If the flag is true, keep all indices
+        % We use a column vector to match the typical output shape of 'unique'
+        unique_idx = (1:length(symcheck))'; 
+    end
+    
     
     % apply symmetry operations to all twinning vectors
-    eta1_s = s * tS(i).eta1;
-    k1_s = s * tS(i).k1;
-    k2_s = s * tS(i).k2;
+    eta1_s = s(unique_idx) * tS(i).eta1;
+    k1_s = s(unique_idx) * tS(i).k1;
+    k2_s = s(unique_idx) * tS(i).k2;
     
-    % remove duplicates
-    [~,ia] = unique([eta1_s.xyz, k1_s.xyz, k2_s.xyz],'rows');
-    eta1_s = eta1_s(ia);
-    k1_s = k1_s(ia);
-    k2_s = k2_s(ia);
+    % Sanity check that all planes still have ths same relation with each
+    % other
+    tol = 1e-4; 
+    ang_k1_eta1 = angle(k1_s, eta1_s, 'noSymmetry');
+    ang_k2_eta1 = angle(k2_s, eta1_s, 'noSymmetry');
+    ang_k1_k2   = angle(k1_s, k2_s, 'noSymmetry');
+    check1 = (max(ang_k1_eta1) - min(ang_k1_eta1)) < tol;
+    check2 = (max(ang_k2_eta1) - min(ang_k2_eta1)) < tol;
+    check3 = (max(ang_k1_k2)   - min(ang_k1_k2))   < tol;
+    if ~(check1 && check2 && check3)
+        error('K2, K1 and eta1 dont have the same relation with each other in the symmetrised objects.');
+    end
     
     % now we have the unique symmetrised triplets, we can create the twinSystem objects
     

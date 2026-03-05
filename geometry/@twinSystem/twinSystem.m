@@ -6,14 +6,14 @@ classdef twinSystem
         k1       % Twin plane
         k2       % Conjugate twin plane
         rotAxis  % Zone axis
-        twinType % Type of twin: 'Type I', 'Type II', or 'Compound'
-
+        twinType % Type of twin: 0:'Compound', 1:'Type I' or 2:'Type II'
+        
     end
 
-  properties (Dependent = true)
-    CS       % Crystal symmetry
-    isSymmetrised
-  end
+    properties (Dependent = true)
+        CS       % Crystal symmetry
+        isSymmetrised
+    end
 
     methods
         function tS = twinSystem(rotAxis, k1, eta1, k2, eta2, CRSS, type)
@@ -25,41 +25,42 @@ classdef twinSystem
                 tS.eta2 = eta2;
                 
                 % Set default twin type
-                if nargin < 8 || isempty(type)
-                    tS.twinType = 'Type I';
+                if nargin < 7 || isempty(type)
+                    tS.twinType = 1;
                 else
                     tS.twinType = type;
                 end
-                               
+
                 % Handle CRSS
-                if nargin >= 7 && ~isempty(CRSS)
+                if nargin >= 6 && ~isempty(CRSS)
                     tS.CRSS = CRSS;
                 else
                     tS.CRSS = 1; % Default value
                 end
 
-                % Automatically set to compound if S is a mirror plane
-                if tS.isCompound
-                    tS.twinType = "Compound";
+                % Automatically set to compound if S (shear plane) is a mirror plane
+                isC = tS.isCompound;
+                if any(isC)
+                    tS.twinType(isC) = 0;
                     %% TODO CHECK FOR ALLOWED PLANES AND DIRECTIONS FOR THE TWIN ELEMENTS BASED ON THE TWIN TYPE+
                 end
             end
         end
-        
-        function CS = get.CS(tS)
-            if isa(tS.eta1,'Miller')
-                CS = tS.eta1.CS;
-            else
-                CS = specimenSymmetry;
-            end
-        end
 
+        function CS = get.CS(tS)
+        if isa(tS.eta1,'Miller')
+            CS = tS.eta1.CS;
+        else
+            CS = specimenSymmetry.default;
+        end
+        end
+        
         function out = get.isSymmetrised(tS)
-            if length(tS)<2
-                out = false;
-            else
-                out = eq(tS.subSet(1),tS.subSet(2));
-            end
+        if length(tS)<2
+            out = false;
+        else
+            out = eq(tS.subSet(1),tS.subSet(2));
+        end
         end
 
         function [isTwinning, variantIndex, tSvariants] = variantDetermination(tS, misOrientation, deviationInDegree)
@@ -114,14 +115,20 @@ classdef twinSystem
 
         function misori = parentTwinMisorientation(tS)
             % The misorientation depends on the twin type.
-            switch tS.twinType
-                case {"Type I", "Compound"}
-                    % Type I twin is defined by a reflection in the K1 plane.
-                    % For centrosymmetric crystals, this is equivalent to a 180-degree rotation about the normal to K1.
-                    misori = rotation.byAxisAngle(tS.k1, pi);
-                case "Type II"
-                    % Type II twin is defined by a 180-degree rotation about eta1.
-                    misori = rotation.byAxisAngle(tS.eta1, pi);
+            misori = rotation.nan(size(tS));
+
+            % Type I (1) and Compound (0)
+            isType1OrCompound = tS.twinType == 1 | tS.twinType == 0;
+            if any(isType1OrCompound)
+                % Type I twin is defined by a reflection in the K1 plane.
+                % For centrosymmetric crystals, this is equivalent to a 180-degree rotation about the normal to K1.
+                misori(isType1OrCompound) = rotation.byAxisAngle(tS.k1(isType1OrCompound), pi);
+            end
+            % Type II (2)
+            isType2 = tS.twinType == 2;
+            if any(isType2)
+                % Type II twin is defined by a 180-degree rotation about eta1.
+                misori(isType2) = rotation.byAxisAngle(tS.eta1(isType2), pi);
             end
         end
 
@@ -169,7 +176,17 @@ classdef twinSystem
             reta1 = char(round(tS.eta1));
             rk1 = char(round(tS.k1));
             if isscalar(tS)
-                n = strcat(strtrim(rk1), " ", strtrim(reta1), " (", tS.twinType, ")");
+                switch tS.twinType
+                    case 0
+                        typeName = "Compound";
+                    case 1
+                        typeName = "Type I";
+                    case 2
+                        typeName = "Type II";
+                    otherwise
+                        typeName = "Unknown";
+                end
+                n = strcat(strtrim(rk1), " ", strtrim(reta1), " (", typeName, ")");
             else
                 n = strcat(rk1, " ", reta1);
             end
@@ -184,13 +201,19 @@ classdef twinSystem
 
         function dispData(tS)
             if isa(tS.CS, 'crystalSymmetry')
+                typeNames = strings(length(tS.eta1),1);
+                typeNames(tS.twinType == 0) = "Compound";
+                typeNames(tS.twinType == 1) = "Type I";
+                typeNames(tS.twinType == 2) = "Type II";
+
                 if tS.eta1.lattice.isTriHex
                     reta1 = round(tS.eta1);
                     rk1 = round(tS.k1);
                     d = [reta1.UVTW rk1.hkil];
                     d(abs(d) < 1e-10) = 0;
                     dataCell = num2cell([d, reshape(tS.CRSS, [], 1)]);
-                    fullRow = [dataCell, repmat({tS.twinType}, size(dataCell, 1), 1)];
+                    fullRow = [dataCell, cellstr(typeNames)];
+                    fullRow = fullRow.'; % Transpose for column-major printing
                     fprintf('eta_1 U   V   T   W | K_1 H   K   I   L   CRSS   Type\n');
                     fprintf('%7.0f %3.0f %3.0f %3.0f |  %3.0f %3.0f %3.0f %3.0f %6.0f   %s\n', fullRow{:});
                     % cprintf([d, reshape(tS.CRSS, [], 1), char({tS.twinType})], '-L', '  ', '-Lc', {'eta_1 U' 'V' 'T' 'W' '| K_1 H' 'K' 'I' 'L' 'CRSS' 'Type'});
@@ -198,7 +221,7 @@ classdef twinSystem
                     d = [tS.eta1.uvw tS.k1.hkl];
                     d(abs(d) < 1e-10) = 0; 
                     numericData = [d, reshape(tS.CRSS, [], 1)];
-                    dataCell = [num2cell(numericData), repmat({tS.twinType}, size(dataCell, 1), 1)];
+                    dataCell = [num2cell(numericData), cellstr(typeNames)];
                     cprintf(dataCell, '-L', '  ', '-Lc', {'eta_1 u' 'v' 'w' '| K_1 h' 'k' 'l' 'CRSS' 'Type'});
                     % cprintf([d, reshape(tS.CRSS, [], 1), char({tS.twinType})], '-L', '  ', '-Lc', {'eta_1 u' 'v' 'w' '| K_1 h' 'k' 'l' 'CRSS' 'Type'});
                 end
@@ -213,11 +236,41 @@ classdef twinSystem
             % This allows for syntax like: doubleTwin = twin1 * twin2;
             nTS = nestedTwinSystem(tS1, tS2);
         end
+
+        function n = length(tS)
+            n = length(tS.k1);
+        end
+
+        function varargout = size(tS,varargin)
+            [varargout{1:nargout}] = size(tS.k1,varargin{:});
+        end
+
+        function l = eq(tS1,tS2)
+            if numel(tS1) > 1 || numel(tS2) > 1
+                 if numel(tS1) == 1, tS1 = repmat(tS1,size(tS2)); end
+                 if numel(tS2) == 1, tS2 = repmat(tS2,size(tS1)); end
+                 l = false(size(tS1));
+                 for i=1:numel(tS1)
+                     l(i) = eq(tS1(i),tS2(i));
+                 end
+                 return
+            end
+            
+            if tS1.CS ~= tS2.CS, l = false; return; end
+            
+            %% CHECK IF CORRECT
+            ops = tS1.CS.quaternion;
+            l = any( (ops * tS1.k1) == tS2.k1 & (ops * tS1.eta1) == tS2.eta1 );
+        end
+
+        function l = ne(tS1,tS2)
+            l = ~eq(tS1,tS2);
+        end
     end
 
     methods (Static = true)
         function tS = byK1eta2(k1, eta2, type)
-            if nargin < 3, type = 'Type I'; end
+            if nargin < 3, type = 1; end
             rotAxis = cross(k1, eta2);
             eta1 = cross(k1, rotAxis);
             k2 = cross(eta2, rotAxis);
@@ -228,7 +281,7 @@ classdef twinSystem
         end
 
         function tS = byK2eta1(k2, eta1, type)
-            if nargin < 3, type = 'Type I'; end
+            if nargin < 3, type = 1; end
             rotAxis = cross(eta1, k2);
             rotAxis.dispStyle = 'UVTW';
             k1 = cross(rotAxis, eta1);
@@ -242,7 +295,7 @@ classdef twinSystem
         end
 
         function tS = byK1rotAxis(k1, rotAxis, type)
-            if nargin < 3, type = 'Type II'; end
+            if nargin < 3, type = 2; end
             if dot(k1, rotAxis, 'noSymmetry') < 1.00e-012
                 eta1 = cross(k1, rotAxis);
                 eta1.dispStyle = 'UVTW';
@@ -258,64 +311,64 @@ classdef twinSystem
         end
 
         function tS = hexagonal_110K(K, CS)
-            if CS.lattice == 6
-                tS = arrayfun(@(x_int) twinSystem.byK1rotAxis(Miller({1, 0, -1, x_int}, CS), Miller({1, -2, 1, 0}, CS, 'UVTW'), 'Type II'), K);
+            if CS.lattice.isTriHex
+                tS = arrayfun(@(x_int) twinSystem.byK1rotAxis(Miller({1, 0, -1, x_int}, CS), Miller({1, -2, 1, 0}, CS, 'UVTW'), 2), K);
             else
                 disp("Provide a hexagonal CS for this method")
             end
         end
 
         function tS = hexagonal_211K(K, CS)
-            if CS.lattice == 6
-                tS = arrayfun(@(x_int) twinSystem.byK1rotAxis(Miller({1, 1, -2, x_int}, CS), Miller({1, -1, 0, 0}, CS, 'UVTW'), 'Type II'), K);
+            if CS.lattice.isTriHex
+                tS = arrayfun(@(x_int) twinSystem.byK1rotAxis(Miller({1, 1, -2, x_int}, CS), Miller({1, -1, 0, 0}, CS, 'UVTW'), 2), K);
             else
                 disp("Provide a hexagonal CS for this method")
             end
         end
 
         function tS = hexagonal_1012_1012(CS)
-            if CS.lattice == 6
-                tS = twinSystem.byK2eta1(Miller(-1, 0, 1, 2, CS), Miller(-1, 0, 1, 1, CS, 'UVTW'), 'Type I');
+            if CS.lattice.isTriHex
+                tS = twinSystem.byK2eta1(Miller(-1, 0, 1, 2, CS), Miller(-1, 0, 1, 1, CS, 'UVTW'), 1);
             else
                 disp("Provide a hexagonal CS for this method")
             end
         end
 
         function tS = hexagonal_1122_0001(CS)
-            if CS.lattice == 6
-                tS = twinSystem.byK2eta1(Miller(0, 0, 0, 1, CS), Miller(-1, -1, 2, 3, CS, 'UVTW'), 'Type I');
+            if CS.lattice.isTriHex
+                tS = twinSystem.byK2eta1(Miller(0, 0, 0, 1, CS), Miller(-1, -1, 2, 3, CS, 'UVTW'), 1);
             else
                 disp("Provide a hexagonal CS for this method")
             end
         end
 
         function tS = hexagonal_1101_1013(CS)
-            if CS.lattice == 6
-                tS = twinSystem.byK2eta1(Miller(1, 0, -1, -3, CS), Miller(1, 0, -1, -2, CS, 'UVTW'), 'Type I');
+            if CS.lattice.isTriHex
+                tS = twinSystem.byK2eta1(Miller(1, 0, -1, -3, CS), Miller(1, 0, -1, -2, CS, 'UVTW'), 1);
             else
                 disp("Provide a hexagonal CS for this method")
             end
         end
 
         function tS = hexagonal_1122_1124(CS)
-            if CS.lattice == 6
-                tS = twinSystem.byK2eta1(Miller(1, 1, -2, -4, CS), Miller(1, 1, -2, -3, CS, 'UVTW'), 'Type I');
+            if CS.lattice.isTriHex
+                tS = twinSystem.byK2eta1(Miller(1, 1, -2, -4, CS), Miller(1, 1, -2, -3, CS, 'UVTW'), 1);
             else
                 disp("Provide a hexagonal CS for this method")
             end
         end
         
         function tS = hexagonal_1124_1122(CS)
-            if CS.lattice == 6
-                tS = twinSystem.byK2eta1(Miller(1, 1, -2, -2, CS), Miller(2, 2, -4, -3, CS, 'UVTW'), 'Type I');
+            if CS.lattice.isTriHex
+                tS = twinSystem.byK2eta1(Miller(1, 1, -2, -2, CS), Miller(2, 2, -4, -3, CS, 'UVTW'), 1);
             else
                 disp("Provide a hexagonal CS for this method")
             end
         end
 
         function tS = hexagonal_1121_0001(CS)
-            if CS.lattice == 6
-                tS = twinSystem.byK2eta1(Miller(0, 0, 0, 1, CS), Miller(-1, -1, 2, 6, CS, 'UVTW'), 'Type I');
+            if CS.lattice.isTriHex
+                tS = twinSystem.byK2eta1(Miller(0, 0, 0, 1, CS), Miller(-1, -1, 2, 6, CS, 'UVTW'), 1);
             else
                 disp("Provide a hexagonal CS for this method")
             end
