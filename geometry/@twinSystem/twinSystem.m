@@ -1,6 +1,5 @@
 classdef twinSystem
     properties
-        CS       % Crystal symmetry
         CRSS     % Critical resolved shear stress
         eta1     % Shear direction
         eta2     % Conjugate shear direction
@@ -8,10 +7,16 @@ classdef twinSystem
         k2       % Conjugate twin plane
         rotAxis  % Zone axis
         twinType % Type of twin: 'Type I', 'Type II', or 'Compound'
+
     end
 
+  properties (Dependent = true)
+    CS       % Crystal symmetry
+    isSymmetrised
+  end
+
     methods
-        function tS = twinSystem(rotAxis, k1, eta1, k2, eta2, CS, CRSS, type)
+        function tS = twinSystem(rotAxis, k1, eta1, k2, eta2, CRSS, type)
             if nargin > 0
                 tS.rotAxis = rotAxis;
                 tS.k1 = k1;
@@ -42,7 +47,7 @@ classdef twinSystem
 
                 % Automatically set to compound if S is a mirror plane
                 if tS.isCompound
-                    tS.twinType = 'Compound';
+                    tS.twinType = "Compound";
                     %% TODO CHECK FOR ALLOWED PLANES AND DIRECTIONS FOR THE TWIN ELEMENTS BASED ON THE TWIN TYPE+
                 end
             end
@@ -95,17 +100,17 @@ classdef twinSystem
             % A twin is compound if the plane of shear S is a mirror plane.
             % The plane of shear S is the cross product of eta1 and k1.
             S = cross(tS.eta1, tS.k1);
-            isC = isMirror(S);
+            isC = S.isMirrorPlane;
         end
 
         function misori = parentTwinMisorientation(tS)
             % The misorientation depends on the twin type.
             switch tS.twinType
-                case {'Type I', 'Compound'}
+                case {"Type I", "Compound"}
                     % Type I twin is defined by a reflection in the K1 plane.
                     % For centrosymmetric crystals, this is equivalent to a 180-degree rotation about the normal to K1.
                     misori = rotation.byAxisAngle(tS.k1, pi);
-                case 'Type II'
+                case "Type II"
                     % Type II twin is defined by a 180-degree rotation about eta1.
                     misori = rotation.byAxisAngle(tS.eta1, pi);
             end
@@ -137,7 +142,7 @@ classdef twinSystem
             displayClass(tS, inputname(1), varargin{:}, 'moreInfo', char(tS.CS, 'compact'));
 
             if length(tS) > 24, disp([' CRSS: ' xnum2str(unique(tS.CRSS))]); end
-            if length(tS) > 1, disp([' size: ' size2str(tS.eta1)]); end % Replaced tS.b with tS.eta1 here
+            if length(tS) > 1, disp([' size: ' size2str(tS.CRSS)]); end % Replaced tS.b with tS.eta1 here
 
             disp(' ');
 
@@ -174,12 +179,19 @@ classdef twinSystem
                     reta1 = round(tS.eta1);
                     rk1 = round(tS.k1);
                     d = [reta1.UVTW rk1.hkil];
-                    d(abs(d) < 1e-10) = 0;                    
-                    cprintf([d, reshape(tS.CRSS, [], 1), char({tS.twinType})], '-L', '  ', '-Lc', {'eta_1 U' 'V' 'T' 'W' '| K_1 H' 'K' 'I' 'L' 'CRSS' 'Type'});
+                    d(abs(d) < 1e-10) = 0;
+                    dataCell = num2cell([d, reshape(tS.CRSS, [], 1)]);
+                    fullRow = [dataCell, repmat({tS.twinType}, size(dataCell, 1), 1)];
+                    fprintf('eta_1 U   V   T   W | K_1 H   K   I   L   CRSS   Type\n');
+                    fprintf('%7.0f %3.0f %3.0f %3.0f |  %3.0f %3.0f %3.0f %3.0f %6.0f   %s\n', fullRow{:});
+                    % cprintf([d, reshape(tS.CRSS, [], 1), char({tS.twinType})], '-L', '  ', '-Lc', {'eta_1 U' 'V' 'T' 'W' '| K_1 H' 'K' 'I' 'L' 'CRSS' 'Type'});
                 else
                     d = [tS.eta1.uvw tS.k1.hkl];
-                    d(abs(d) < 1e-10) = 0;                    
-                    cprintf([d, reshape(tS.CRSS, [], 1), char({tS.twinType})], '-L', '  ', '-Lc', {'eta_1 u' 'v' 'w' '| K_1 h' 'k' 'l' 'CRSS' 'Type'});
+                    d(abs(d) < 1e-10) = 0; 
+                    numericData = [d, reshape(tS.CRSS, [], 1)];
+                    dataCell = [num2cell(numericData), repmat({tS.twinType}, size(dataCell, 1), 1)];
+                    cprintf(dataCell, '-L', '  ', '-Lc', {'eta_1 u' 'v' 'w' '| K_1 h' 'k' 'l' 'CRSS' 'Type'});
+                    % cprintf([d, reshape(tS.CRSS, [], 1), char({tS.twinType})], '-L', '  ', '-Lc', {'eta_1 u' 'v' 'w' '| K_1 h' 'k' 'l' 'CRSS' 'Type'});
                 end
             else
                 d = round(100 * [tS.eta1.xyz tS.k1.xyz]) ./ 100;
