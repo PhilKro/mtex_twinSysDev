@@ -10,6 +10,7 @@ switch s(1).type
         tS.CRSS = subsref(tS.CRSS,s(1));
         tS.eta2 = subsref(tS.eta2,s(1));
         tS.k2 = subsref(tS.k2,s(1));
+        tS.twinType = subsref(tS.twinType,s(1));
         if numel(s)>1
             [varargout{1:nargout}] = builtin('subsref',tS,s(2:end));
         else

@@ -30,14 +30,7 @@ classdef twinSystem
                 else
                     tS.twinType = type;
                 end
-                
-                % Handle Crystal Symmetry
-                if nargin >= 6 && ~isempty(CS)
-                    tS.CS = CS;
-                elseif isa(k1, 'Miller')
-                    tS.CS = k1.CS;
-                end
-                
+                               
                 % Handle CRSS
                 if nargin >= 7 && ~isempty(CRSS)
                     tS.CRSS = CRSS;
@@ -50,6 +43,22 @@ classdef twinSystem
                     tS.twinType = "Compound";
                     %% TODO CHECK FOR ALLOWED PLANES AND DIRECTIONS FOR THE TWIN ELEMENTS BASED ON THE TWIN TYPE+
                 end
+            end
+        end
+        
+        function CS = get.CS(tS)
+            if isa(tS.eta1,'Miller')
+                CS = tS.eta1.CS;
+            else
+                CS = specimenSymmetry;
+            end
+        end
+
+        function out = get.isSymmetrised(tS)
+            if length(tS)<2
+                out = false;
+            else
+                out = eq(tS.subSet(1),tS.subSet(2));
             end
         end
 
@@ -212,7 +221,7 @@ classdef twinSystem
             rotAxis = cross(k1, eta2);
             eta1 = cross(k1, rotAxis);
             k2 = cross(eta2, rotAxis);
-            tS = twinSystem(rotAxis, k1, eta1, k2, eta2, k1.CS, 1, type);
+            tS = twinSystem(rotAxis, k1, eta1, k2, eta2, 1, type);
             
             shearvec = 2 * (tS.k1.normalize - dot(tS.eta2.normalize, tS.k1.normalize).^-1 * tS.eta2.normalize);
             assert(dot(shearvec, tS.eta1, 'noSymmetry') > 0, "Something went wrong in the definition of the twin system: eta1 has the wrong sense. Sense of shear will not be correct")
@@ -226,7 +235,7 @@ classdef twinSystem
             k1.dispStyle = 'hkil';
             eta2 = cross(rotAxis, k2);
             eta2.dispStyle = 'UVTW';
-            tS = twinSystem(rotAxis, k1, eta1, k2, eta2, k2.CS, 1, type);
+            tS = twinSystem(rotAxis, k1, eta1, k2, eta2, 1, type);
             
             shearvec = 2 * (tS.k1.normalize - dot(tS.eta2.normalize, tS.k1.normalize).^-1 * tS.eta2.normalize);
             assert(dot(shearvec, tS.eta1, 'noSymmetry') > 0, "Something went wrong in the definition of the twin system: eta1 has the wrong sense. Sense of shear will not be correct")
@@ -242,7 +251,7 @@ classdef twinSystem
                 eta2 = k1;
                 eta2.dispStyle = 'UVTW';
                 disp(append(newline, 'Chose a set of values for K2 and eta2!'))
-                tS = twinSystem(rotAxis, k1, eta1, k2, eta2, k1.CS, 1, type);
+                tS = twinSystem(rotAxis, k1, eta1, k2, eta2, 1, type);
             else
                 error("k1 and rotAxis have to be orthogonal")
             end
