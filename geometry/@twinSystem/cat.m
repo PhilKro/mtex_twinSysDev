@@ -14,7 +14,7 @@ function tS = cat(dim, varargin)
 varargin(cellfun('isempty',varargin)) = [];
 tS = varargin{1};
 
-tSCS = cell(size(varargin)); tStwinType = tSCS; tSCRSS = tSCS; tSeta1= tSCS; tSeta2= tSCS; tSk1= tSCS; tSk2= tSCS; tSrotAxis= tSCS;
+tSCRSS = cell(size(varargin)); tStwinType = tSCRSS; tSeta1= tSCRSS; tSeta2= tSCRSS; tSk1= tSCRSS; tSk2= tSCRSS; tSrotAxis= tSCRSS;
 for i = 1:numel(varargin)
   tS2 = varargin{i};
   if ~isempty(tS2)
@@ -23,6 +23,7 @@ for i = 1:numel(varargin)
     tSk1{i} = tS2.k1;
     tSk2{i} = tS2.k2;
     tSrotAxis{i} = tS2.rotAxis;
+    tStwinType{i} = tS2.twinType;
     tSCRSS{i} = tS2.CRSS;
   end
 end
@@ -33,6 +34,5 @@ tS.eta2 = cat(dim,tSeta2{:});
 tS.k1 = cat(dim,tSk1{:});
 tS.k2 = cat(dim,tSk2{:});
 tS.rotAxis = cat(dim,tSrotAxis{:});
-tS.CS = cat(dim,tSCS{:});
 tS.twinType = cat(dim,tStwinType{:});
 tS.CRSS = cat(dim,tSCRSS{:});

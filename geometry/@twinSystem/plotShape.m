@@ -2,9 +2,9 @@ function plotShape(tS)
 %WHATZEFAK Summary of this function goes here
 %   Detailed explanation goes here
 % go with CS.lattice == 6  -> hexagonal
-if strcmp(tS.CS.char(),'"6/mmm"')
+if tS.CS.lattice.isTriHex
     cS = crystalShape.hex(tS.CS);
-elseif strcmp(tS.CS.char(),'"m-3m"')
+elseif eq(tS.CS.lattice, latticeType.cubic)
     cS = crystalShape.cube(tS.CS);
 else
     disp('Do not have a crystal shape for this symmetry, please define yourself in @twinSystem/plotShape'); 
