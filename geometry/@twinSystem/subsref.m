@@ -11,6 +11,7 @@ switch s(1).type
         tS.eta2 = subsref(tS.eta2,s(1));
         tS.k2 = subsref(tS.k2,s(1));
         tS.twinType = subsref(tS.twinType,s(1));
+        tS.variantId = subsref(tS.variantId,s(1));
         if ~isempty(tS.parent)
             tS.parent = subsref(tS.parent,s(1));
         end

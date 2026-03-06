@@ -8,6 +8,7 @@ classdef twinSystem
         rotAxis  % Zone axis
         twinType % Type of twin: 0:'Compound', 1:'Type I' or 2:'Type II'
         parent   % Parent object (orientation, grain2d, or twinSystem)
+        variantId % Variant ID
         
     end
 
@@ -17,14 +18,13 @@ classdef twinSystem
     end
 
     methods
-        function tS = twinSystem(rotAxis, k1, eta1, k2, eta2, CRSS, type)
+        function tS = twinSystem(rotAxis, k1, eta1, k2, eta2, CRSS, type, variantId)
             if nargin > 0
                 tS.rotAxis = rotAxis;
                 tS.k1 = k1;
                 tS.eta1 = eta1;
                 tS.k2 = k2;
-                tS.eta2 = eta2;
-                
+                tS.eta2 = eta2;                
 
                 % Set default twin type
                 if nargin < 7 || isempty(type)
@@ -38,6 +38,13 @@ classdef twinSystem
                     tS.CRSS = CRSS;
                 else
                     tS.CRSS = 1; % Default value
+                end
+
+                % Handle variantId
+                if nargin < 8 || isempty(variantId)
+                    tS.variantId = ones(size(tS.k1));
+                else
+                    tS.variantId = variantId;
                 end
 
                 % Automatically set to compound if S (shear plane) is a mirror plane
@@ -198,18 +205,18 @@ classdef twinSystem
                     rk1 = round(tS.k1);
                     d = [reta1.UVTW rk1.hkil];
                     d(abs(d) < 1e-10) = 0;
-                    dataCell = num2cell([d, reshape(tS.CRSS, [], 1)]);
+                    dataCell = num2cell([d, reshape(tS.CRSS, [], 1), reshape(tS.variantId, [], 1)]);
                     fullRow = [dataCell, cellstr(typeNames)];
                     fullRow = fullRow.'; % Transpose for column-major printing
-                    fprintf('eta_1 U   V   T   W | K_1 H   K   I   L   CRSS   Type\n');
-                    fprintf('%7.0f %3.0f %3.0f %3.0f |  %3.0f %3.0f %3.0f %3.0f %6.0f   %s\n', fullRow{:});
+                    fprintf('eta_1 U   V   T   W | K_1 H   K   I   L   CRSS  Variant   Type \n');
+                    fprintf('%7.0f %3.0f %3.0f %3.0f |  %3.0f %3.0f %3.0f %3.0f %6.2f %8d   %s\n', fullRow{:});
                     % cprintf([d, reshape(tS.CRSS, [], 1), char({tS.twinType})], '-L', '  ', '-Lc', {'eta_1 U' 'V' 'T' 'W' '| K_1 H' 'K' 'I' 'L' 'CRSS' 'Type'});
                 else
                     d = [tS.eta1.uvw tS.k1.hkl];
                     d(abs(d) < 1e-10) = 0; 
-                    numericData = [d, reshape(tS.CRSS, [], 1)];
+                    numericData = [d, reshape(tS.CRSS, [], 1), reshape(tS.variantId, [], 1)];
                     dataCell = [num2cell(numericData), cellstr(typeNames)];
-                    cprintf(dataCell, '-L', '  ', '-Lc', {'eta_1 u' 'v' 'w' '| K_1 h' 'k' 'l' 'CRSS' 'Type'});
+                    cprintf(dataCell, '-L', '  ', '-Lc', {'eta_1 u' 'v' 'w' '| K_1 h' 'k' 'l' 'CRSS' 'Variant' 'Type'});
                     % cprintf([d, reshape(tS.CRSS, [], 1), char({tS.twinType})], '-L', '  ', '-Lc', {'eta_1 u' 'v' 'w' '| K_1 h' 'k' 'l' 'CRSS' 'Type'});
                 end
             else
