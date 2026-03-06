@@ -6,7 +6,7 @@ cs = crystalSymmetry('6/mmm', 'mineral', 'Re');
 tS_1121 = twinSystem.hexagonal_1121_0001(cs);
 tS_sym = tS_1121.symmetrise;
 tS_sym(2)
-slippy_the_SlipSystem = slipSystem.basal(cs);
+% slippy_the_SlipSystem = slipSystem.basal(cs);
 
 parentOri_1 = orientation.byEuler(1,1,1,cs);
 parentOri_2 = orientation.byEuler(2,1,2,cs);
@@ -33,7 +33,7 @@ orientatedTwin.parentTwinMisorientation
 grainedTwin = mtimes(dummyGrains,tS_1121)
 grainedTwin.parent
 grainedTwin.orientation
-grainedTwin.parentTwinMisorientation
+%grainedTwin.parentTwinMisorientation
 
 %% testing single orientation, multiple tS
 ori = oris(1);
@@ -63,21 +63,24 @@ multi_orientated_sym_Twin.parent
 multi_orientated_sym_Twin.orientation
 multi_orientated_sym_Twin.parentTwinMisorientation
 
-%% testing single tS, multiple tS
-
+%% testing single tS (without parentgrain), multiple tS
+%this will return NaN orinetaitons because the parent twinSystem has no orientation
 twinned_Twins = tS_1121*tS_sym
-% if I pass in a 1x1tS*nx1tS_sym the line 260 (parentsExpanded =
-% parentObj(idx);) creates a nx1 parentExpnaded twin object which only
-% contains 1x1 properties (idx in that case is [1;1;1;...]. maybe sth wrong in subasng or sth like this? are we gonna breack
-% any other functions changing that?
-
 twinned_Twins.parent
 twinned_Twins.orientation
 
+%% testing single tS (with parentgrain), multiple tS
+%lets try a "grained" twinSystem as a parent
+graintwinned_Twins = grainedTwin*tS_sym
+graintwinned_Twins.parent
+graintwinned_Twins.orientation
+
 %% testing multiple tS, single tS
+% TODO
+
 multitwinned_Twin = tS_sym*tS_1121
-% multitwinned_Twin.parent
-% multitwinned_Twin.orientation
+multitwinned_Twin.parent
+multitwinned_Twin.orientation
 
 % here it fales bc idx = [1;2;3;4;...] but sth wrong in the size of the
 % PARENT (FIGURE OUT) mnb
