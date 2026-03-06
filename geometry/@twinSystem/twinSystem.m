@@ -331,7 +331,14 @@ classdef twinSystem
             % which is desired behavior as we can't process mixed types easily.
             parents = [tS.parent];
             
-            if numel(parents) ~= numel(tS.eta1)
+            % PROBOABLY A PROBLEM WITH twinSystem as parent
+            if isa(parents, 'twinSystem')
+                numparents = numel(parents.eta1);
+            else
+                numparents = numel(parents);
+            end
+
+            if numparents ~= numel(tS.eta1)
                 error('twinSystem:orientation:missingParent', ...
                     'Parent orientation is not defined for all twin systems in the array.');
             end
