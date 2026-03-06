@@ -40,7 +40,7 @@ ori = oris(1);
 orientated_sym_Twin = ori*tS_sym
 orientated_sym_Twin.parent
 orientated_sym_Twin.orientation
-orientated_sym_Twin.parentTwinMisorientation
+%orientated_sym_Twin.parentTwinMisorientation
 
 %% testing single grain, multiple tS
 grain = dummyGrains(1);

@@ -61,10 +61,10 @@ for i = 1:length(tS)
     eta2_s = cross(rotAxis_s,k2_s);
 
     if tS(i).variantId == 1
-        variantId_s = 1:length(eta1_s);
+        variantId_s = transpose(1:length(eta1_s));
     else
         warning('twinSystem:symmetrise:notVariant1','Hope the variant assignment works correctly. Please check the output carefully.')
-        variantId_s = mod((tS(i).variantId - 1) + (0:length(eta1_s)-1), length(eta1_s)) + 1;
+        variantId_s = transpose(mod((tS(i).variantId - 1) + (0:length(eta1_s)-1), length(eta1_s)) + 1);
     end
 
     
