@@ -358,6 +358,43 @@ classdef twinSystem
             ori = pOri .* tS.parentTwinMisorientation;
         end
 
+        function [superP, n] = superParent(tS)
+            % SUPERPARENT Find the highest level parent of the given object
+            %
+            % Syntax
+            %   [superP, n] = superParent(tS)
+            %
+            % Output
+            %   superP - The root parent object (orientation, grain2d, or twinSystem)
+            %   n      - Number of layers traversed
+            
+            superP = tS;
+            n = 0;
+            
+            while isa(superP, 'twinSystem') && ~isempty(superP)
+                % Check if parents exist
+                parentsCell = {superP.parent};
+                
+                % If any element is missing a parent, we stop to avoid returning
+                % a mixed list or erroring on concatenation.
+                if any(cellfun('isempty', parentsCell))
+                    break;
+                end
+                
+                % Move up one level
+                try
+                    nextParents = [superP.parent];
+                catch
+                    warning('twinSystem:superParent:mixedParents', ...
+                        'Could not concatenate parents. They might be of mixed types.');
+                    break;
+                end
+                
+                superP = nextParents;
+                n = n + 1;
+            end
+        end
+
         function n = length(tS)
             n = length(tS.k1);
         end

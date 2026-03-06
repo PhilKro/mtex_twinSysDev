@@ -9,7 +9,7 @@ tS.rotAxis = tS.rotAxis(ind);
 tS.CRSS = tS.CRSS(ind);
 tS.twinType = tS.twinType(ind);
 if ~isempty(tS.parent)
-    tS.parent = tS.parent(ind);
+    tS.parent = tS.parent.subSet(ind);
 else
     tS.parent = [];
 end
