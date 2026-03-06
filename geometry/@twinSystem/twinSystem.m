@@ -64,16 +64,9 @@ classdef twinSystem
         end
         end
 
-        function [isTwinning, variantIndex, tSvariants] = variantDetermination(tS, misOrientation, deviationInDegree)
-            tSvariants = tS.symmetrise('antipodal');
-            variantMatch = angle(misOrientation, tSvariants.parentTwinMisorientation(), 'noSym1') / degree;
-            variantMatch_logic = variantMatch == min(variantMatch, [], 2) & variantMatch < deviationInDegree;
-            isTwinning = logical(variantMatch_logic * ones(length(tSvariants), 1));
-            variantIndex = variantMatch_logic * transpose(1:length(tSvariants));
-            variantIndex = variantIndex(isTwinning);
-        end
         
         function [variantIndex] = variantDetermination2(tS, misOrientation, deviationInDegree)
+            warning('twinSystem:variantDetermination2:deprecated', 'variantDetermination2 has to be deleted, also purged from subsref.')
             tSvariants = tS.symmetrise('antipodal');
             variantPTM = tSvariants.parentTwinMisorientation();
             if iscolumn(variantPTM)
@@ -91,21 +84,6 @@ classdef twinSystem
             variantIndex = variantMatch_logic * transpose(1:length(tSvariants));
         end
         
-        function [anglesMisoriFromTwin] = anglefromTwin(tS, misOrientation)
-            tSvariants = tS.symmetrise('antipodal');
-            variantPTM = tSvariants.parentTwinMisorientation();
-            if iscolumn(variantPTM)
-                if iscolumn(misOrientation)
-                    misOrientation = misOrientation.';
-                end
-            else
-                if isrow(misOrientation)
-                    misOrientation = misOrientation.'; 
-                end
-            end
-            variantMatch_angle = angle(misOrientation, variantPTM, 'noSym1') / degree;
-            anglesMisoriFromTwin = min(variantMatch_angle, [], 2);
-        end
 
         function isC = isCompound(tS)
             % A twin is compound if the plane of shear S is a mirror plane.
@@ -115,6 +93,7 @@ classdef twinSystem
         end
 
         function misori = parentTwinMisorientation(tS)
+            warning('twinSystem:parentTwinMisorientation:deprecated', 'parentTwinMisorientation does not handle recursive twin objects yet.')
             % The misorientation depends on the twin type.
             misori = orientation.nan(tS.CS, tS.CS, size(tS));
 
@@ -136,20 +115,24 @@ classdef twinSystem
         end
 
         function shear = shearMagnitude(tS)
+            warning('twinSystem:shearMagnitude:deprecated', 'shearMagnitude does not handle recursive twin objects yet. Might anyways be redundand with the shear method.')
             shear = sqrt(4 * ((dot(tS.eta2.normalize, tS.k1.normalize).^-2) - 1));
         end
         
         function [shearvector, shearMagnitude] = shear(tS)
+            warning('twinSystem:shear:deprecated', 'Shearmagnitude does not handle recursive twin objects yet.')
             shearvector = 2 * (tS.k1.normalize - dot(tS.eta2.normalize, tS.k1.normalize).^-1 * tS.eta2.normalize);
             shearvector.dispStyle = 'UVTW';
             shearMagnitude = norm(shearvector);
         end
         
         function defTensor = displacementGradient(tS)
+            warning('twinSystem:displacementGradient:deprecated', 'DisplacementGradient does not handle recursive twin objects yet.')
             defTensor = (tS.shearMagnitude .* dyad(tS.eta1, tS.k1).normalize);
         end
         
         function correspondanceMatrix = correspondanceMatrix(tS)
+            warning('twinSystem:correspondanceMatrix:deprecated', 'correspondanceMatrix does not handle recursive twin objects yet.')
             correspondanceMatrix = -tensor.eye(tS.CS) + 2 * dyad(tS.eta2, tS.k1).normalize;
         end
 
@@ -424,7 +407,7 @@ classdef twinSystem
             if tS1.CS ~= tS2.CS, l = false; return; end
             
             %% CHECK IF CORRECT
-            warning('TODO: check if the implementation of twinSystem/eq is correct.')
+            warning('twinSystem:eq:correctness','TODO: check if the implementation of twinSystem/eq is correct.')
             ops = tS1.CS.quaternion;
             l = any( (ops * tS1.k1) == tS2.k1 & (ops * tS1.eta1) == tS2.eta1 );
         end
