@@ -75,23 +75,30 @@ graintwinned_Twins = grainedTwin*tS_sym
 graintwinned_Twins.parent
 graintwinned_Twins.orientation
 
+sample = graintwinned_Twins(2)
+sample.parent.parent
+[sP,n] = sample.superParent;
+sP
+n
+%% triple nest
+graintwinned_Twins_twin = graintwinned_Twins*tS_1121
+sample = graintwinned_Twins_twin(2)
+[sP,n] = sample.superParent;
+sP
+n
 %% testing multiple tS, single tS
-% TODO
 
 multitwinned_Twin = tS_sym*tS_1121
 multitwinned_Twin.parent
 multitwinned_Twin.orientation
-
-% here it fales bc idx = [1;2;3;4;...] but sth wrong in the size of the
-% PARENT (FIGURE OUT) mnb
-
 
 %% testing multiple tS, multiple tS
 multitwinned_Twins = tS_sym*tS_sym
 multitwinned_Twins.parent
 multitwinned_Twins.orientation
 
-%% next prompt going down the rabbit hole (or maybe blocking this by introducing a "isMultiplied" property that stops the user from going here)
+%%------------------
+% WORKS UNTIL HERE
+%%------------------
+%% TODO next prompt going down the rabbit hole (or maybe blocking this by introducing a "isMultiplied" property that stops the user from going here)
 % okay what happens if i symmetrise a activated twin system. that should be no problem right. the parent of the symmetrised twins will be the same and makes physical sense (should cause no problems, please think of problems that could arise??). right now these properties get chugged out during symmetrization. however if this twinSystem is the parent of another, how would that be handled, either some recursive stuff (or better forbid it, what do you think)
-% ja i dont think thats it the length of the object is determined correctly and it is created correctly as a 6x1 object array, but it is only populated with 1x1 object arrays. doesnt that mean sth is wrong with cat or sth or subsref but numel(tS.eta1) reliably returns the number of tS elements. somehow implementing a numel method breaks other logic bc it is called befor the subsref (sth like this i made a comment in the subsref method). please think again
-
