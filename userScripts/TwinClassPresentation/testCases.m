@@ -67,7 +67,7 @@ disp('Identifying parent grain and defining twin systems...');
 % Identify the largest grain as the parent grain for the analysis
 [~, parentId] = max(grains.numPixel);
 parentGrain = grains(parentId);
-parentGrains = grains(angle(parentGrain.meanOrientation, grains.meanOrientation) < 5*degree);
+parentGrains = grains(angle(parentGrain.meanOrientation, grains.meanOrientation) < 8*degree);
 
 % Create a twinSystem object for the {11-21} twinning in Rhenium
 tS_1121 = twinSystem.hexagonal_1121_0001(CS);
@@ -85,8 +85,11 @@ analysis_twin = grain_sym_twin * tS_sym;
 disp('Identifying primary and secondary twins...');
 
 % Get orientations of the primary (first layer) twins
-primary_twins = unique(analysis_twin.parent);
-primary_twin_oris = primary_twins.orientation;
+% implement sth like this
+% primary_twins = unique(analysis_twin.parent);
+% primary_twin_oris = primary_twins.orientation;
+% this is the shortcut
+primary_twin_oris = grain_sym_twin.orientation;
 
 % Get orientations of the secondary (second layer) twins
 secondary_twin_oris = analysis_twin.orientation;
@@ -98,6 +101,7 @@ tolerance = 8 * degree;
 isPrimary = false(length(grains), 1);
 isSecondary = false(length(grains), 1);
 primaryVariantId = zeros(length(grains), 1);
+secondaryVariantId = zeros(length(grains), 2);
 
 % --- Identify Primary Twins ---
 % Iterate through all grains to find primary twins
@@ -111,7 +115,7 @@ for i = 1:length(grains)
     % If the match is within tolerance, classify as a primary twin
     if minAngle < tolerance
         isPrimary(i) = true;
-        primaryVariantId(i) = bestFit;
+        primaryVariantId(i) = grain_sym_twin(bestFit).variantId;
     end
 end
 
@@ -119,14 +123,15 @@ end
 % Iterate through all grains to find secondary twins among the remaining ones
 for i = 1:length(grains)
     % Skip parent and primary grains
-    if grains(i).id == parentGrain.id || isPrimary(i), continue; end
+    if any(grains(i).id == parentGrains.id) || isPrimary(i), continue; end
     
     % Check if the grain orientation matches any secondary twin orientation
-    minAngle = min(angle(grains(i).meanOrientation, secondary_twin_oris));
+    [minAngle, bestFit] = min(angle(grains(i).meanOrientation, secondary_twin_oris));
     
     % If the match is within tolerance, classify as a secondary twin
     if minAngle < tolerance
         isSecondary(i) = true;
+        secondaryVariantId(i,:) = [analysis_twin(bestFit).parent.variantId, analysis_twin(bestFit).variantId];
     end
 end
 
@@ -139,12 +144,13 @@ figure;
 plot(grains, grains.meanOrientation, 'facealpha', 0.3)
 hold on
 
+
 % Define colormap for primary twin variants
 colors = lines(length(primary_twin_oris));
 
 % Plot the parent grain in a grey tone
 plot(parentGrains, 'facecolor', [0.8 0.8 0.8]);
-text(parentGrains.centroid, 'P', 'BackgroundColor', 'w', 'HorizontalAlignment', 'center');
+text(parentGrains, 'P', 'BackgroundColor', 'w', 'HorizontalAlignment', 'center');
 
 % Plot the identified primary twins with variant-specific colors
 primaryGrains = grains(isPrimary);
@@ -159,16 +165,20 @@ for v_idx = 1:length(uniqueVariants)
     grainsOfVariant = primaryGrains(variantIdsOfPrimaryGrains == variant);
     
     if ~isempty(grainsOfVariant)
+        hold on
         plot(grainsOfVariant, 'facecolor', colors(variant,:));
-        text(grainsOfVariant.centroid, ['Primary V' num2str(variant)], 'BackgroundColor', 'w', 'HorizontalAlignment', 'center');
+        text(grainsOfVariant, ['PV' num2str(variant)], 'HorizontalAlignment', 'center');
     end
 end
 
 % Plot the identified secondary twins in pink
 secondaryGrains = grains(isSecondary);
 if ~isempty(secondaryGrains)
+    hold on
     plot(secondaryGrains, 'facecolor', 'm'); % 'm' for magenta/pink
-    text(secondaryGrains.centroid, 'Secondary', 'BackgroundColor', 'w', 'HorizontalAlignment', 'center');
+    secIds = secondaryVariantId(isSecondary, :);
+    labels = arrayfun(@(x) sprintf('T%d,%d', secIds(x,1), secIds(x,2)), 1:size(secIds,1), 'UniformOutput', false);
+    text(secondaryGrains, labels, 'HorizontalAlignment', 'center');
 end
 
 hold off
