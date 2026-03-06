@@ -59,8 +59,16 @@ for i = 1:length(tS)
     
     rotAxis_s = cross(eta1_s,k1_s);
     eta2_s = cross(rotAxis_s,k2_s);
+
+    if tS(i).variantId == 1
+        variantId_s = 1:length(eta1_s);
+    else
+        warning('twinSystem:symmetrise:notVariant1','Hope the variant assignment works correctly. Please check the output carefully.')
+        variantId_s = mod((tS(i).variantId - 1) + (0:length(eta1_s)-1), length(eta1_s)) + 1;
+    end
+
     
-    tS_new = twinSystem(rotAxis_s, k1_s, eta1_s, k2_s, eta2_s, repmat(tS(i).CRSS,length(eta1_s),1), repmat(tS(i).twinType,length(eta1_s),1));
+    tS_new = twinSystem(rotAxis_s, k1_s, eta1_s, k2_s, eta2_s, repmat(tS(i).CRSS,length(eta1_s),1), repmat(tS(i).twinType,length(eta1_s),1), variantId_s);
     
     if i == 1
         tSsym = tS_new;
