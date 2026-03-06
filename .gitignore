@@ -22,3 +22,16 @@ myScripts
 .mailmap
 gitTricks.md
 /extern/chebfun
+
+# Image and vector graphic files
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.tif
+*.tiff
+*.bmp
+*.svg
+*.eps
+*.pdf
+*.ang

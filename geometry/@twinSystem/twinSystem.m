@@ -25,6 +25,7 @@ classdef twinSystem
                 tS.k2 = k2;
                 tS.eta2 = eta2;
                 
+
                 % Set default twin type
                 if nargin < 7 || isempty(type)
                     tS.twinType = 1;
