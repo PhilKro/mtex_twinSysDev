@@ -248,8 +248,8 @@ classdef twinSystem
                 parentObj = A(:);
                 childObj = B(:);
                 
-                nParent = numel(parentObj);
-                nChild = numel(childObj);
+                nParent = numel(parentObj.eta1);
+                nChild = numel(childObj.eta1);
                 
                 % Expand child (inner loop) -> [C1; C2; C1; C2]
                 tS = repmat(childObj, nParent, 1);
@@ -257,7 +257,7 @@ classdef twinSystem
                 % Expand parent (outer loop) -> [P1; P1; P2; P2]
                 % Use indexing for robustness with object arrays
                 idx = kron(1:nParent, ones(1, nChild)).';
-                parentsExpanded = parentObj(idx);
+                parentsExpanded = parentObj.subSet(idx);
                 
                 % Assign parents
                 if nParent * nChild > 0
