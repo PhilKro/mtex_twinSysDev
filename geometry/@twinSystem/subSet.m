@@ -8,6 +8,10 @@ tS.eta2 = tS.eta2(ind);
 tS.rotAxis = tS.rotAxis(ind);
 tS.CRSS = tS.CRSS(ind);
 tS.twinType = tS.twinType(ind);
-tS.parent = tS.parent(ind);
+tS.parent = [];
+if ~isempty(tS.parent)
+    tS.parent = tS.parent(ind);
+end
+
 
 end
