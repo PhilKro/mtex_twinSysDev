@@ -11,6 +11,10 @@ function l = isMirrorPlane(m)
 %   l - logical
 
 % get symmetry operations
+
+if m.CS.isProper
+    warning('Miller:isMirrorPlane:ProperPointGroup', 'Your point group is proper. Do not ask me about mirror planes!')
+end
 symOps = rotation(m.CS);
 
 % generate reflection operators for the planes
