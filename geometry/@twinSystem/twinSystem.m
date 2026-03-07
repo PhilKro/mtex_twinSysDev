@@ -111,7 +111,7 @@ classdef twinSystem
                 % Type I twin is defined by a reflection in the K1 plane.
                 % For centrosymmetric crystals, this is equivalent to a 180-degree rotation about the normal to K1.
                 warning('twinSystem:parentTwinMisorientation:type1Assumption', ...
-                    'The current implementation works with an improper rotation here. This might not work for the orientation analysis. Maybe the proper rotation should be implemented here aswell/instead?');
+                    'The current implementation works with an improper rotation here. For orientation analysis this might not work (especially if you work with a centrosymmteric point group). Maybe the proper rotation should be implemented here aswell/instead?');
                 misori(isType1OrCompound) = -orientation.byAxisAngle(tS.k1(isType1OrCompound), pi);
             end
             % Type II (2)
@@ -242,7 +242,9 @@ classdef twinSystem
                     fprintf('%7.0f %3.0f %3.0f %3.0f |  %3.0f %3.0f %3.0f %3.0f %6.2f %8d   %s\n', fullRow{:});
                     % cprintf([d, reshape(tS.CRSS, [], 1), char({tS.twinType})], '-L', '  ', '-Lc', {'eta_1 U' 'V' 'T' 'W' '| K_1 H' 'K' 'I' 'L' 'CRSS' 'Type'});
                 else
-                    d = [tS.eta1.uvw tS.k1.hkl];
+                    reta1 = round(tS.eta1);
+                    rk1 = round(tS.k1);
+                    d = [reta1.uvw rk1.hkl];
                     d(abs(d) < 1e-10) = 0; 
                     numericData = [d, reshape(tS.CRSS, [], 1), reshape(tS.variantId, [], 1)];
                     dataCell = [num2cell(numericData), cellstr(typeNames)];
@@ -469,12 +471,29 @@ classdef twinSystem
 
         function tS = byK2eta1(k2, eta1, type)
             if nargin < 3, type = 1; end
+            latticeIsHex = eq(eta1.CS.lattice, latticeType.hexagonal);
+
             rotAxis = cross(eta1, k2);
-            rotAxis.dispStyle = 'UVTW';
+            if latticeIsHex
+                rotAxis.dispStyle = 'UVTW';
+            else
+                rotAxis.dispStyle = 'uvw';
+            end
+            
             k1 = cross(rotAxis, eta1);
-            k1.dispStyle = 'hkil';
+            if latticeIsHex
+                k1.dispStyle = 'hkil';
+            else
+                k1.dispStyle = 'hkl';
+            end
+
             eta2 = cross(rotAxis, k2);
-            eta2.dispStyle = 'UVTW';
+            if latticeIsHex
+                eta2.dispStyle = 'UVTW';
+            else
+                eta2.dispStyle = 'uvw';
+            end
+
             tS = twinSystem(rotAxis, k1, eta1, k2, eta2, 1, type);
             
             shearvec = 2 * (tS.k1.normalize - dot(tS.eta2.normalize, tS.k1.normalize).^-1 * tS.eta2.normalize);
@@ -482,12 +501,21 @@ classdef twinSystem
         end
 
         function tS = byK1rotAxis(k1, rotAxis, type)
+            error('twinSystem:byK1rotAxis:deprecated',"This method is not fully implemented yet. Use byK1eta2 or byK2eta1 instead for now.")
             if nargin < 3, type = 2; end
             if dot(k1, rotAxis, 'noSymmetry') < 1.00e-012
                 eta1 = cross(k1, rotAxis);
-                eta1.dispStyle = 'UVTW';
+                if eq(eta1.CS.lattice, latticeType.hexagonal)
+                    eta1.dispStyle = 'UVTW';
+                else
+                    eta1.dispStyle = 'uvw';
+                end
                 k2 = eta1;
-                k2.dispStyle = 'hkil';
+                if eq(eta1.CS.lattice, latticeType.hexagonal)
+                    k2.dispStyle = 'hkil';
+                else
+                    k2.dispStyle = 'hkl';
+                end
                 eta2 = k1;
                 eta2.dispStyle = 'UVTW';
                 disp(append(newline, 'Chose a set of values for K2 and eta2!'))
@@ -558,6 +586,24 @@ classdef twinSystem
                 tS = twinSystem.byK2eta1(Miller(0, 0, 0, 1, CS), Miller(-1, -1, 2, 6, CS, 'UVTW'), 1);
             else
                 disp("Provide a hexagonal CS for this method")
+            end
+        end
+
+        function tS = fcc_111_111(CS)
+            % classic fcc {111}<112> twin system
+            if eq(CS.lattice, latticeType.cubic)
+                tS = twinSystem.byK2eta1(Miller(1, 1,-1, CS), Miller(1, 1, -2, CS, 'uvw'), 1);
+            else
+                disp("Provide a cubic CS for this method")
+            end
+        end
+
+        function tS = bcc_112_112(CS)
+            % classic bcc {112}<111> twin system
+            if eq(CS.lattice, latticeType.cubic)
+                tS = twinSystem.byK2eta1(Miller(-1, -1,2, CS), Miller(-1, -1, 1, CS, 'uvw'), 1);
+            else
+                disp("Provide a cubic CS for this method")
             end
         end
     end
