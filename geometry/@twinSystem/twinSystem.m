@@ -165,7 +165,7 @@ classdef twinSystem
                 pOri = reshape(pOri, size(defTensor));
 
                 % 4. Transform the deformation tensor from crystal to specimen coordinates
-                defTensor = pOri * defTensor;
+                defTensor = pOri .* defTensor;
             end
         end
         
