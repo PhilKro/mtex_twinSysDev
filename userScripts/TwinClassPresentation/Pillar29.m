@@ -185,4 +185,3 @@ hold off
 title('Primary and Secondary Twin Analysis of Rhenium');
 legend off % Hide legend for clarity
 
-disp('Analysis complete.');

@@ -135,8 +135,38 @@ classdef twinSystem
         end
         
         function defTensor = displacementGradient(tS)
-            warning('twinSystem:displacementGradient:deprecated', 'DisplacementGradient does not handle recursive twin objects yet.')
-            defTensor = (tS.shearMagnitude .* dyad(tS.eta1, tS.k1).normalize);
+            warning('twinSystem:displacementGradient:deprecated', 'Hopefully displacementGradient handles recursive twin objects correctly.')
+            % 1. Calculate the local deformation tensor in the parent crystal reference frame
+            defTensor = tS.shearMagnitude .* dyad(tS.eta1, tS.k1).normalize;
+
+            % 2. If no parent is attached, return the tensor in crystal coordinates
+            if isempty(tS.parent) || all(cellfun('isempty', {tS.parent}))
+                return;
+            end
+
+            % 3. Retrieve the root parent to check if it is tied to specimen coordinates
+            superP = tS.superParent();
+
+            if isa(superP, 'orientation') || isa(superP, 'grain2d')
+                parents = [tS.parent];
+
+                % Extract the specimen orientation of the immediate parent
+                if isa(parents, 'twinSystem')
+                    pOri = parents.orientation();
+                elseif isa(parents, 'grain2d')
+                    pOri = parents.meanOrientation;
+                elseif isa(parents, 'orientation')
+                    pOri = parents;
+                else
+                    return;
+                end
+
+                % Ensure the parent orientation array matches the dimensions of the twin array
+                pOri = reshape(pOri, size(defTensor));
+
+                % 4. Transform the deformation tensor from crystal to specimen coordinates
+                defTensor = pOri * defTensor;
+            end
         end
         
         function correspondanceMatrix = correspondanceMatrix(tS)
