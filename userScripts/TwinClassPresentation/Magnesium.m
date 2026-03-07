@@ -140,7 +140,7 @@ end
 % Highlight Parents
 parentGrains = grains(ismember(grains.id, parentIds));
 hold on
-plot(parentGrains, 'faceColor', 'r','faceAlpha', 0.1, 'lineWidth', 2)
+plot(parentGrains, 'faceColor', 'r','faceAlpha', 0.5, 'lineWidth', 2)
 
 % Annotate criteria values
 if ~isempty(parentStats)
@@ -148,5 +148,5 @@ if ~isempty(parentStats)
     txt = arrayfun(@(i) sprintf('Sz:%d\nV:%d\nIW:%.1f', ...
         parentStats(i,2), parentStats(i,3), 100*parentStats(i,4)), ...
         1:size(parentStats,1), 'UniformOutput', false);
-    text(grains(loc), txt, 'FontSize', 8, 'Halo', true);
+    text(grains(loc), txt, 'color','w','FontSize', 12, 'FontWeight', 'bold', 'Halo', true);
 end
