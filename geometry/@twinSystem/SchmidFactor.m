@@ -18,7 +18,7 @@ function SF = SchmidFactor(tS,sigma,varargin)
 %   
 
 eta1 = tS.eta1.normalize; %#ok<*PROPLC>
-k1 = tS.n.normalize;
+k1 = tS.k1.normalize;
 
 % compute the relative Schmid factor by dividing by the critical resolved
 % shear stress for every slip system
