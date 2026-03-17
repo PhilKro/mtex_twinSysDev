@@ -73,7 +73,7 @@ ipf = ipfColorKey(ebsd_raw.CS);
 % figure; plot(grains, grains.meanOrientation, 'noBoundary'); title('Pre-cleaned grains');
 % % exportScaledFigure(gcf, 'Pre-cleaned grains.jpg', 'dpi', 200)
 %% plot sigma boundaries befor cleanup
-plotgrains = grains_cleand_phi;
+plotgrains = grains_raw;
 
 
 sigmaAngles = [60, 38.21, 27.8, 46.83, 21.79] * degree;
@@ -112,15 +112,19 @@ clear plotgBs
 pseudoSym1 = orientation.byAxisAngle(Miller(0,0,0,1,CS), 60*degree);
 pseudoSym2 = orientation.byAxisAngle(Miller(0,0,0,1,CS), 30*degree);
 pseudoSym = [pseudoSym1, pseudoSym2];
-% 
-% ebsd = pseudoSymmetryCorrection(ebsd_raw, pseudoSym);
 
 %% 3. PseudoSymmetry removal
-[ebsd_cleanedRalf,grains_cleand_Ralf] = cleanUpPseudoSym(ebsd_raw,grains_raw,pseudoSym(1));
 
-%% 3. PseudoSymmetry removal
-[ebsd_cleaned_phi,grains_cleand_phi, numChanged_phi] = cleanUpPseudoSym_Phil(ebsd_raw,grains_raw,pseudoSym);
+% Version 1: Ralph orginal (dauert zuuu lange)
+% [ebsd,grains] = cleanUpPseudoSym(ebsd_raw,grains_raw,pseudoSym(1));
+
+% Version 2: Ralph aber schnell (~6000 pixel verändert)
+% veränder den threshold parameter
+[ebsd,grains, numChanged] = cleanUpPseudoSym_Phil(ebsd_raw,grains_raw,pseudoSym, 'threshold', 1.5);
 numChanged_phi
+
+% Version 3: Philipp (26000 pixel verändert)
+% ebsd = pseudoSymmetryCorrection(ebsd_raw, pseudoSym);
 
 %% Parameter Analysis for Pseudo Symmetry Grains (Debug)
 % % Identify grains involved in pseudo-symmetry boundaries
@@ -152,7 +156,7 @@ numChanged_phi
 % figure; plot(grains.boundary); hold on; plot(grains_check, check_PA); mtexColorbar
 %% Final grain reconstruction
 
-[grains, ebsd('indexed').grainId] = calcGrains(ebsd('indexed'), 'angle', 5*degree, 'alpha',1, 'minPixel',5);
+% [grains, ebsd('indexed').grainId] = calcGrains(ebsd('indexed'), 'angle', 5*degree, 'alpha',1, 'minPixel',5);
 
 % Smooth boundaries to get better trace directions
 grains = smooth(grains, 5);
@@ -163,6 +167,42 @@ gB = grains.boundary('indexed','indexed');
 
 figure; plot(grains, grains.meanOrientation, 'noBoundary'); title('Full clean')
 % exportScaledFigure(gcf, 'CleanedPseudoSym_Grains.jpg', 'dpi', 200)
+
+%% 2. Plot sigma boundaries after cleanup
+plotgrains = grains;
+
+
+sigmaAngles = [60, 38.21, 27.8, 46.83, 21.79] * degree;
+sigmaNames = {'Sigma 3', 'Sigma 7', 'Sigma 13', 'Sigma 19', 'Sigma 21'};
+colors = {'r', 'g', 'b', 'c', 'm'};
+grainColors = ipf.orientation2color(plotgrains.meanOrientation);
+plotgBs = plotgrains.boundary('indexed','indexed');
+
+sigmas = orientation.byAxisAngle(Miller(0,0,0,1,CS), sigmaAngles);
+
+wierd_sigmas = orientation.byAxisAngle(Miller(1,-2,1,0,CS,'UVWT'), 20*degree);
+
+isSigmaAny = false(size(gB_raw));
+
+% Visualize where they are
+figure;
+plot(plotgrains, grainColors, 'faceAlpha', 0.1, 'noBoundary')
+hold on
+
+for i = 1:length(sigmas)
+    isSigma = angle(plotgBs.misorientation, sigmas(i)) < 5*degree;
+    isSigmaAny = isSigmaAny | isSigma;
+    
+    plot(plotgBs(isSigma), 'lineColor', colors{i}, 'lineWidth', 2, 'DisplayName', sigmaNames{i})
+end
+
+legend show
+title('Identified Sigma Boundaries')
+hold off
+
+clear plotgrains
+clear grainColors
+clear plotgBs
 
 %% Plot grains with crystal shapes
 % cS = crystalShape.hex(ebsd.CS);
@@ -307,3 +347,48 @@ mtexColorbar
 legend
 title('Trace Consistency Analysis')
 % exportScaledFigure(gcf, 'Trace_Consistency_Analysis.jpg', 'dpi', 200)
+
+%% GBCD averaging from different maps
+
+current_gbcd = gbcd;
+current_boundary_length = sum(gB(isSigmaAny).segLength);
+
+% 1. Display the required warning to the user
+warning(['Only one GBCD is calculated in this script. ', ...
+         'To calculate a weighted average, the second GBCD must be imported ', ...
+         'from a .mat file. Please ensure the .mat file contains variables ', ...
+         'appropriately named ''imported_gbcd'' and ''imported_length''.']);
+
+% 2. Prompt the user to select and load the .mat file
+[fileName, pathName] = uigetfile('*.mat', 'Select the .mat file containing the second GBCD');
+
+if isequal(fileName, 0)
+    disp('File selection canceled. Skipping the weighted average GBCD calculation.');
+else
+    % Load the data from the selected .mat file into a struct
+    loadedData = load(fullfile(pathName, fileName));
+    
+    % Verify the appropriately named variables exist in the loaded data
+    if isfield(loadedData, 'imported_gbcd') && isfield(loadedData, 'imported_length')
+        
+        imported_gbcd = loadedData.imported_gbcd;
+        imported_length = loadedData.imported_length;
+        
+        % Ensure the current and imported GBCDs have identical matrix/array sizes
+        if isequal(size(current_gbcd), size(imported_gbcd))
+            
+            % 3. Calculate the weighted average based on boundary lengths
+            total_length = current_boundary_length + imported_length;
+            
+            weighted_avg_gbcd = ((current_gbcd * current_boundary_length) + ...
+                                 (imported_gbcd * imported_length)) / total_length;
+                                 
+            disp('Success: Weighted average GBCD calculated and saved to variable ''weighted_avg_gbcd''.');
+            
+        else
+            error('Dimension mismatch: The imported GBCD array does not match the size of the calculated GBCD array.');
+        end
+    else
+        error('Missing variables: The selected .mat file must contain exactly ''imported_gbcd'' and ''imported_length''.');
+    end
+end

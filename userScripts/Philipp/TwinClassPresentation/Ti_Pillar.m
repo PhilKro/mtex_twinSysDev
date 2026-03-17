@@ -17,8 +17,9 @@ disp('Loading and pre-processing EBSD data...');
 
 % Define file name and crystal symmetry for Rhenium
 % Please ensure the .ang file is in the MATLAB path.
-fname = 'userScripts/TwinClassPresentation/pillar29 Specimen 3 Site 1 Map Data 3_BW158.ang';
-CS = crystalSymmetry('6/mmm',[2.761 2.761 4.458],'x||a','mineral','Re');
+fname = 'onedriveData/Kamila/2024-04-30_Kamila TKD Ti Specimen 3 Site 2 Map Data 10_BW123.ang';
+boundingbox = [0.3 0.45 6.3 9.8];
+CS = crystalSymmetry('6/mmm',[2.95 2.95 4.68],'x||a','mineral','Ti');
 
 % Load EBSD data
 ebsd = EBSD.load(fname, CS, 'convertEuler2SpatialReferenceFrame','setting 2');
@@ -31,6 +32,7 @@ tkd_tilt = -20 * degree;
 ebsd = rotate(ebsd,rotation.byAxisAngle(xvector,-70*degree + tkd_tilt),'keepXY');
 rot = rotation.byAxisAngle(zvector,180*degree);
 ebsd = rotate(ebsd,rot,'keepXY');
+ebsd = ebsd(inpolygon(ebsd, boundingbox));
 
 % Gridify the data for faster processing and visualization
 ebsd = ebsd.gridify;
@@ -67,13 +69,13 @@ disp('Identifying parent grain and defining twin systems...');
 % Identify the largest grain as the parent grain for the analysis
 [~, parentId] = max(grains.numPixel);
 parentGrain = grains(parentId);
-parentGrains = grains(angle(parentGrain.meanOrientation, grains.meanOrientation) < 8*degree);
+parentGrains = grains(angle(parentGrain.meanOrientation, grains.meanOrientation) < 12*degree);
 
 % Create a twinSystem object for the {11-21} twinning in Rhenium
-tS_1121 = twinSystem.hexagonal_1121_0001(CS);
+tS_1122 = twinSystem.hexagonal_1122_1124(CS);
 
 % Symmetrise to get all unique twin variants
-tS_sym = tS_1121.symmetrise;
+tS_sym = tS_1122.symmetrise;
 
 % Generate the first layer of twins from the parent grain
 grain_sym_twin = parentGrain * tS_sym;
@@ -95,7 +97,7 @@ primary_twin_oris = grain_sym_twin.orientation;
 secondary_twin_oris = analysis_twin.orientation;
 
 % Define tolerance for orientation matching
-tolerance = 8 * degree;
+tolerance = 12 * degree;
 
 % Initialize logical arrays to classify grains
 isPrimary = false(length(grains), 1);
@@ -185,3 +187,65 @@ hold off
 title('Primary and Secondary Twin Analysis of Rhenium');
 legend off % Hide legend for clarity
 
+%% 6. Quiver K1 Plane Traces
+disp('Plotting traces of K1 planes for primary and secondary twins...');
+
+% Create a new figure for the traces
+figure;
+plot(grains, grains.meanOrientation, 'facealpha', 0.3)
+hold on
+plot(grains.boundary, 'lineWidth', 1.5);
+plot(parentGrains, 'facecolor', [0.8 0.8 0.8]);
+text(parentGrains, 'P', 'BackgroundColor', 'w', 'HorizontalAlignment', 'center');
+
+% --- Plot Primary Twin K1 Traces ---
+primaryGrains = grains(isPrimary);
+varIds_P = primaryVariantId(isPrimary);
+
+for i = 1:length(primaryGrains)
+    varID = varIds_P(i);
+    if varID == 0, continue; end
+    
+    % The k1 plane in crystal coordinates
+    k1_crystal = tS_sym(varID).k1;
+    
+    % Transform to specimen coordinates using parent orientation
+    k1_specimen = parentGrain.meanOrientation * k1_crystal;
+    k1_specimen.antipodal = 1;
+    
+    % Calculate trace direction (cross product with zvector)
+    trace_dir = cross(k1_specimen, zvector);
+    
+    % Plot the trace inside the primary twin grain
+    hold on;
+    quiver(primaryGrains(i), trace_dir, 'autoScale', 'off', 'color', colors(varID,:), 'LineWidth', 2);
+end
+
+% --- Plot Secondary Twin K1 Traces ---
+secondaryGrains = grains(isSecondary);
+varIds_S = secondaryVariantId(isSecondary, :);
+
+for i = 1:length(secondaryGrains)
+    p_varID = varIds_S(i, 1);
+    s_varID = varIds_S(i, 2);
+    if p_varID == 0 || s_varID == 0, continue; end
+    
+    % The theoretical orientation of the primary twin (parent of this secondary)
+    primaryOri = parentGrain.meanOrientation * tS_sym(p_varID).parentTwinMisorientation;
+    
+    % The k1 plane of the secondary twin in crystal coordinates
+    k1_crystal = tS_sym(s_varID).k1;
+    
+    % Transform to specimen coordinates using the primary twin orientation
+    k1_specimen = primaryOri * k1_crystal;
+    k1_specimen.antipodal = 1;
+    
+    % Calculate trace direction
+    trace_dir = cross(k1_specimen, zvector);
+    
+    % Plot the trace inside the secondary twin grain
+    quiver(secondaryGrains(i), trace_dir, 'autoScale', 'off', 'color', 'm', 'LineWidth', 2);
+end
+
+hold off
+title('K1 Plane Traces of Identified Twins');
