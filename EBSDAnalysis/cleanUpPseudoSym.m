@@ -39,6 +39,7 @@ cond = tortuosity > maxT & gB.componentSize > 4;
 ind = ebsd.grainId > 0;
 ebsd.grainId(ind) = parentId(grains.id2ind(ebsd.grainId(ind)));
 
+%numChanged = 0; % 1. Initialize the counter here
 % update EBSD orientations
 for k=newInd
   
@@ -49,6 +50,7 @@ for k=newInd
   swap = angle(ori,grainsM.meanOrientation(k) * inv(mori)) ...
     < angle(ori,grainsM.meanOrientation(k));
   
+  %numChanged = numChanged + sum(swap);
   ori(swap) = ori(swap) * mori;
   ebsd.orientations(ind) = ori;
 
