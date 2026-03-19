@@ -30,12 +30,8 @@ tkd_tilt = -11 * degree;
 % define threshold for CI, 0.15 is safe
 thresh_ci = 0.1;
 
-% crystal symmetry, make sure to use correct space group and c/a ratio, currently Zn is
-% used
+% crystal symmetry, make sure to use correct space group and c/a ratio
 CS = crystalSymmetry('6/mmm',[2.95 2.95 4.68],'x||a','mineral','Ti');
-
-
-
 
 %%% perform corrections for tkd tilt and misaligned axes %%%
 ebsd = EBSD.load(file,CS,'convertEuler2SpatialReferenceFrame','setting 2');

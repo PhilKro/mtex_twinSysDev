@@ -61,7 +61,7 @@ classdef dislocationSystem
         elseif sS.CS.lattice == 'cubic' %#ok<BDSCA>
           b = 0.5*unique(sS.b,'antipodal','noSymmetry');
         else
-          b = 0.5*unique(sS.b,'antipodal','noSymmetry');
+          b = unique(sS.b,'antipodal','noSymmetry');
           warning('I could not determine the correct length of the Burgers vector. Please adjust it manually.')
         end
 

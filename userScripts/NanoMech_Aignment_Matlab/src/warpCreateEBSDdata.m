@@ -1,4 +1,4 @@
-function [newEBSD, varargout] = warpCreateEBSDdata(oldEBSD,Xnew,Ynew,alignmentData)
+function [newEBSD] = warpCreateEBSDdata(oldEBSD,Xnew,Ynew,alignmentData)
 %%% this function creates a new Mtex EBSD variable/struct by warping an old one using alignment data created from point selection.
 %%% Xnew and Ynew are the aimed grids in the target configuration (i.e.
 %%% reference), align_data contains the warping information
@@ -22,16 +22,20 @@ else
 end
 
 % use MTEX interp function to interpolate the old EBSD data to the new
-[newEBSD, idNearest] = interp(oldEBSD,Xnew+Ux,Ynew+Uy,'method','nearest');
+% [newEBSD, idNearest] = interp(oldEBSD,Xnew+Ux,Ynew+Uy,'method','nearest');
+newEBSD = interp(oldEBSD,vector3d(Xnew+Ux,Ynew+Uy,0),'method','nearest');
 newEBSD.x = Xnew(:);
 newEBSD.y = Ynew(:);
 
 % create new unitCell variable, to be sure.
-newEBSD.unitCell = calcUnitCell([Xnew(:) - mean(Xnew(:)),Ynew(:) - mean(Ynew(:))]);
+unitCellXY = calcUnitCell([Xnew(:) - mean(Xnew(:)),Ynew(:) - mean(Ynew(:))]);
+warning('warpCreateEBSDdata: this assignment will break at some point when calcUnitCell is fixed to returen a vector3d')
+newEBSD.unitCell = vector3d(unitCellXY(:,1),unitCellXY(:,2), zeros(size(unitCellXY(:,2))));
 
-% return idNearest as varargout
-if nargout > 1
-    varargout{1} = idNearest;     % <<< added
-end
+% idNearest is not returned by interp, at least not in MTEX 6.1.1
+% % return idNearest as varargout
+% if nargout > 1
+%     varargout{1} = idNearest;     % <<< added
+% end
 
 end

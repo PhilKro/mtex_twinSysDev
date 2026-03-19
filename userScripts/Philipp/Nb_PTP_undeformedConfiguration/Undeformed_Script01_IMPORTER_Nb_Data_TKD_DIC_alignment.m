@@ -12,7 +12,7 @@ plottingConvention.default.outOfScreen = -zvector;
 % set up defaults for any missing input fields
 
 % defaults
-defaults.dir            = fullfile('data','Nb_PTP');
+defaults.dir            = fullfile('onedriveData','Philipp','Nb_PTP');
 defaults.SEImagefolder  = fullfile('DIC_SE_Images');          % folder under input.dir
 defaults.startx         = 1280;                             % crop region start x
 defaults.starty         = 1;                            % crop region start y
@@ -22,12 +22,13 @@ defaults.bandWidth      = 263;                          % BW of the spherical In
 defaults.tkd_tilt = -10 * degree;                       % define tilt for TKD
 defaults.thresh_ci = 0.01;                              % define threshold for CI, 0.15 is usually safe
 defaults.DIC_filename = 'Processing_subset=25_step=8';
+defaults.outDir         = 'Processed_Output';           % folder under input.dir to save output files
 
 
 input = struct( ...
     'fname',             'insitu Specimen 1 0 Map Data 1', ...    % base EBSD filename (no extension)                   
     'SEImagefname',      '0_10kv_DIC.tif', ...          % SE image filename
-    'DICfoldername' ,    fullfile('data','Nb_PTP','DIC_h5', defaults.DIC_filename),... % DIC HDF5 filename
+    'DICfoldername' ,    fullfile('onedriveData','Philipp','Nb_PTP','DIC_h5', defaults.DIC_filename),... % DIC HDF5 filename
     'sel_points_fname', 'insitu Specimen 1 0 Map Data 1_BW263_20251126_115536_Selection_Points_Backup_EBSD.mat'); % mat file with preselected points for alignment                     
 
 %% import setup: merge input with defaults and save to JSON
@@ -42,6 +43,11 @@ for k = 1:numel(fn)
 end
 
 % construct full paths
+input.outPath         = fullfile(input.dir, input.outDir);
+if ~exist(input.outPath, 'dir')
+    mkdir(input.outPath);
+end
+
 input.SEImageFullPath = fullfile(input.dir, input.SEImagefolder, input.SEImagefname);
 % input.DIC_path  = fullfile(input.dir, input.DICfoldername, input.DICfname);
 input.ang_path        = fullfile(input.dir, [input.fname,'_BW',num2str(defaults.bandWidth),'.ang']);
@@ -55,7 +61,7 @@ fprintf('Using IO config:\n  dir: %s\n  fname: %s\n  SE image: %s\n  crop: [%d %
     input.dir, input.fname, input.SEImageFullPath, input.startx, input.starty, input.numx, input.numy, input.DICfoldername);
 
 % save ioConfig to a JSON file with datestring in the filename
-outname = sprintf([options.in_situIncrementName, '_undeformed_ioConfig.json']);
+outname = fullfile(input.outPath, sprintf([options.in_situIncrementName, '_undeformed_ioConfig.json']));
 
 jsonText = jsonencode(input);
 % write JSON to file
@@ -105,19 +111,20 @@ ebsd(ebsd.ci < defaults.thresh_ci) = 'notIndexed';
 rot = rotation.byAxisAngle(zvector,180*degree);
 ebsd = rotate(ebsd,rot,'keepXY');
 
-% reference orientaiton for project2FundamentalRegion see https://github.com/mtex-toolbox/mtex/discussions/2311
-indebsd = ebsd('indexed');
-refebsd = indebsd(1);
-reforientation = refebsd.orientations;
-clear indebsd
-reforientation = reforientation.project2FundamentalRegion();
-reforientation = orientation.byEuler(184.137*degree,79.9861*degree,180.076*degree);
+% Project to fundamental 
+targetFile = fullfile(input.dir, 'refOri.mat');
+try
+    % Load only the variable 'refOrientation' from the specific file
+    data = load(targetFile, 'refOrientation');
+    refOrientation = data.refOrientation;
 
+    % Apply the orientation projection using the loaded data
+    ebsd.orientations = ebsd.orientations.project2FundamentalRegion(refOrientation);
 
-
-ebsd.orientations = ebsd.orientations.project2FundamentalRegion(reforientation);
-% I think this is the better command
-%project2FundamentalRegion(ebsd.orientations,refebsd.orientations)
+catch
+    % If the file is missing or 'refOrientation' is not inside it, trigger this error
+    error('Could not find the file at %s. Please use the same reference orientation for all imports.', targetFile);
+end
 
 % import the ctfs to extract BC and MAD
 
@@ -174,7 +181,7 @@ nextAxis
 plot(ebsd,ebsd.prop.bands)
 title('Bands')
 
-exportScaledFigure(gcf,[input.fname,options.dateString,'ebsd_.png'],'nodatestring', 'extrawidth')
+exportScaledFigure(gcf,fullfile(input.outPath, [input.fname,options.dateString,'ebsd_.png']),'nodatestring', 'extrawidth')
 
 %%
 % -------------------------------------------------------------------------
@@ -229,7 +236,7 @@ end
 alignment_data_EBSD = pointSelectionForAlignment(rawData.(REF),rawData.(DEF),options);
 
 if ~exist('SelectionFnameEBSD','var')
-    save([options.in_situIncrementName, '_', options.case,'_alignment_data_EBSD'],'alignment_data_EBSD')
+    save(fullfile(input.outPath, [options.in_situIncrementName, '_', options.case,'_alignment_data_EBSD']),'alignment_data_EBSD')
 end
 
 %% ----------------------
@@ -240,7 +247,7 @@ psize_new = rawData.SE_raw.psize;  % use SE pixel size (edit as needed)
 
 newEBSD = warpCreateEBSDdata(rawData.EBSD0.data_grid,Xnew,Ynew,alignment_data_EBSD);
 
-%save the id state so the ebsd objects can be refenced with each other
+% save the id state so the ebsd objects can be refenced with each other
 newEBSD.prop.originalId = newEBSD.prop.oldId;
 originalEBSD = ebsd;
 originalEBSD.prop.originalId = ebsd.id;
@@ -266,7 +273,7 @@ plot(newEBSD,newEBSD.prop.SE_raw,'micronbar','off')
 hold on
 plot(newGrains.boundary,'lineColor','red','linewidth',1.5)
 title('Aligned EBSD boundaries over SE image')
-exportScaledFigure(gcf,[input.fname,options.dateString,'AlignedEBSD_SE_.png'],'extraheight','nodatestring')
+exportScaledFigure(gcf,fullfile(input.outPath, [input.fname,options.dateString,'AlignedEBSD_SE_.png']),'extraheight','nodatestring')
 % %% ---------------------
 % % Save aligned newEBSD for later use
 % save([options.in_situIncrementName,'_aligned_newEBSD'], 'newEBSD', 'originalEBSD')
@@ -550,7 +557,7 @@ maxStrainTest = newEBSD.prop.B0005_Displacements_y_displacement;
 %maxStrainTest(newEBSD.prop.Others_CorrelationValue>0.9) = 0;
 
 % Step 3: Plot Fyx with jet colormap and transparency
-plot(newEBSD, maxStrainTest, 'FaceAlpha', 0.7);
+plot(newEBSD, maxStrainTest(:), 'FaceAlpha', 0.7);
 title('First step data')
 colormap(viridis);
 %caxis([0 0.2]);
@@ -572,7 +579,7 @@ maxStrainTest = newEBSD.prop.(dicNames{end});
 %maxStrainTest(newEBSD.prop.Others_CorrelationValue>0.9) = 0;
 
 % Step 3: Plot Fyx with jet colormap and transparency
-plot(newEBSD, maxStrainTest, 'FaceAlpha', 0.7);
+plot(newEBSD, maxStrainTest(:), 'FaceAlpha', 0.7);
 title('Last step data')
 colormap(viridis);
 %caxis([0 0.2]);
@@ -580,5 +587,6 @@ mtexColorbar('title', 'Displacement y');
 % exportScaledFigure(gcf,[input.fname,options.dateString,'AlignedDIC_SE_MaximumShearStrain.png'],'extraheight','nodatestring')
 %% ----------------------
 % Save newEBSD with DIC for later use
-save([options.in_situIncrementName,input.DIC_filename,'_undeformedEBSD_withAllDIC.mat'], 'newEBSD', 'originalEBSD')
-fprintf('Saved as: %s\n', [options.in_situIncrementName,input.DIC_filename,'_undeformedEBSD_withAllDIC.mat'])
+finalOutName = fullfile(input.outPath, [options.in_situIncrementName, input.DIC_filename, '_undeformedEBSD_withAllDIC.mat']);
+save(finalOutName, 'newEBSD', 'originalEBSD')
+fprintf('Saved as: %s\n', finalOutName)

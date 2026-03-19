@@ -10,9 +10,9 @@ plottingConvention.default.east = xvector;
 plottingConvention.default.outOfScreen = -zvector;
 
 %% define a crystal orientation and slip systems
-
-matname = 'insitu Specimen 1 0 Map Data 1_BW263_20251209_100205Processing_subset=25_step=8_undeformedEBSD_withAllDIC_withGrains';
-load([matname,'.mat'])
+dir = fullfile('onedriveData','Philipp','Nb_PTP', 'Processed_Output');
+matname = 'insitu Specimen 1 0 Map Data 1_BW263_20260319_144702Processing_subset=25_step=8_undeformedEBSD_withAllDIC';
+load(fullfile(dir, [matname,'.mat']))
 
 %% calc grains
 if exist('grains', 'var')
@@ -48,7 +48,7 @@ else
     text(grains,grains.id)
     hold off
     
-    save([matname,'_withGrains.mat'], 'newEBSD', 'originalEBSD', 'grains')
+    save(fullfile(dir,[matname,'_withGrains.mat']), 'newEBSD', 'originalEBSD', 'grains')
     fprintf('Saved as: %s\n', [matname,'_withGrains.mat'])
 end
 %% plot some things to show the data
@@ -107,7 +107,7 @@ close all
 % CHOOSE THE DIC INCREMENT FROM WHICH TO TAKE THE DISPLACEMENT DATA
 % increment = 8;
 increments = [7];
-grains_ids = [1];
+grains_ids = [2];
 % loop through DIC increments
 for i_i = 1:length(increments)
     increment = increments(i_i);
@@ -116,9 +116,21 @@ for i_i = 1:length(increments)
         clear IDoptions
         close all
         grainId = grains_ids(g_i);
+        
         % get local slip systems
         sSLocal = grains(grainId).meanOrientation * sS;
         
+        % constrain slip systems to those with an SF>0.2
+        threshold_SF = 0.2;
+        stressState = stressTensor.uniaxial(yvector);
+        SF_crit = abs(sSLocal.SchmidFactor(stressState))>threshold_SF;
+        if threshold_SF>0
+            warning('Slip systems constrained to those with a SF higher than: %f', threshold_SF)
+        end
+        
+        sSLocal = sSLocal(SF_crit);
+        sS = sS(SF_crit);
+
         % extract ebsd data (which includes the disp data) for the choosen grain
         ebsd = newEBSD(grains(grainId));
         ebsd = ebsd.gridify;
@@ -198,7 +210,7 @@ for i_i = 1:length(increments)
         IDoptions.plotTraces = 1;
         
         % provide stress state for SF calculation
-        IDoptions.stress = stressTensor.uniaxial(yvector);
+        IDoptions.stress = stressState;
         
         % give this a name for saving
         IDoptions.casename = [matname,num2str(grainId),'_sS_batch',num2str(idName{Ss_batch}),'DIC_inc',num2str(increment)];
@@ -250,7 +262,7 @@ for i_i = 1:length(increments)
         [ebsdID,optOut] = SSLIP(ebsd,U,V,sSLocal,IDoptions);
         
         %%% save the results in a matfile
-        save(optOut.plotname,'ebsdID','sSLocal','optOut');
+        save(fullfile(dir,optOut.plotname),'ebsdID','sSLocal','optOut');
         
         SF = abs(SchmidFactor(sSLocal,IDoptions.stress));
         SF = round(SF*100)/100;
@@ -262,8 +274,8 @@ for i_i = 1:length(increments)
                   'VariableNames', {'SlipSystem_ID', 'Burgers_Vector_b', 'Plane_Normal_n', 'Schmid_Factor', 'Contained_in_batch'});
         
         % 3. Write the Table to a CSV file.
-        filename = '_SlipSystem_Data.csv';
-        writetable(T, ['SSLIP_CGR_' num2str(IDoptions.coarsegrain),'_Filt_' num2str(IDoptions.filterSize), '_',matname,num2str(grainId),'_sS_batch',num2str(idName{Ss_batch}),filename]);
+        filename = fullfile(dir,['SSLIP_CGR_' num2str(IDoptions.coarsegrain),'_Filt_' num2str(IDoptions.filterSize), '_',matname,num2str(grainId),'_sS_batch',num2str(idName{Ss_batch}),'_SlipSystem_Data.csv']);        
+        writetable(T, filename);
     end
 end
 % plot one activity field (system 1), just to demonstrate how data is

@@ -12,7 +12,7 @@ plottingConvention.default.outOfScreen = -zvector;
 % set up defaults for any missing input fields
 
 % defaults
-defaults.dir            = fullfile('data','Nb_PTP');
+defaults.dir            = fullfile('onedriveData','Philipp','Nb_PTP');
 defaults.SEImagefolder  = fullfile('DIC_SE_Images');          % folder under input.dir
 defaults.startx         = 1280;                             % crop region start x
 defaults.starty         = 1;                            % crop region start y
@@ -159,19 +159,20 @@ ebsd(ebsd.ci < defaults.thresh_ci) = 'notIndexed';
 rot = rotation.byAxisAngle(zvector,180*degree);
 ebsd = rotate(ebsd,rot,'keepXY');
 
-% reference orientaiton for project2FundamentalRegion see https://github.com/mtex-toolbox/mtex/discussions/2311
-indebsd = ebsd('indexed');
-refebsd = indebsd(1);
-reforientation = refebsd.orientations;
-clear indebsd
-reforientation = reforientation.project2FundamentalRegion();
-reforientation = orientation.byEuler(184.137*degree,79.9861*degree,180.076*degree);
+% Project to fundamental 
+targetFile = fullfile(input.dir, 'refOri.mat');
+try
+    % Load only the variable 'refOrientation' from the specific file
+    data = load(targetFile, 'refOrientation');
+    refOrientation = data.refOrientation;
 
+    % Apply the orientation projection using the loaded data
+    ebsd.orientations = ebsd.orientations.project2FundamentalRegion(refOrientation);
 
-
-ebsd.orientations = ebsd.orientations.project2FundamentalRegion(reforientation);
-% I think this is the better command
-%project2FundamentalRegion(ebsd.orientations,refebsd.orientations)
+catch
+    % If the file is missing or 'refOrientation' is not inside it, trigger this error
+    error('Could not find the file at %s. Please use the same reference orientation for all imports.', targetFile);
+end
 
 % import the ctfs to extract BC and MAD
 
