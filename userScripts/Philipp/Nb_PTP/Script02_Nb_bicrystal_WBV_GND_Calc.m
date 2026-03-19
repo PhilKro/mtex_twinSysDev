@@ -668,6 +668,7 @@ dS = dislocationSystem.bcc(originalEBSD.CS);
 
 %Assumption about energy of screw dislocations based on poisson ratio
 nu = 0.3;
+
 % energy of the screw dislocations arbitrarily set to 1
 dS(dS.isEdge).u = 1/(1 - 0.3);
 % energy of the screw dislocations

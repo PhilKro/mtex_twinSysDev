@@ -28,7 +28,7 @@ plottingConvention.default.outOfScreen = -zvector;
 %% Load data from .ang file
 
 % filename
-dir = 'data\Ti_PTP\Ti_cAxis_PTP_1\';
+dir = 'onedriveData/Philipp/Ti_PTP/Ti_cAxis_PTP_1/';
 % file = 'Insitu Specimen 1 Site 9 Map Data 8_BW158.ang';
 % file = 'Insitu Specimen 1 Site 8 Map Data 7_BW123.ang';
 % file = 'Insitu Specimen 1 Site 7 Map Data 6_BW158.ang';

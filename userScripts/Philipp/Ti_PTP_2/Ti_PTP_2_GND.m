@@ -4,15 +4,18 @@
 clear 
 close all
 
-% Mtex directions (important when working with EBSD)
-setMTEXpref('xAxisDirection','east');
-setMTEXpref('zAxisDirection','intoPlane');
+% Mtex plotting directions
+plotx2east
+plotzIntoPlane
+
+plottingConvention.default.east = xvector;
+plottingConvention.default.outOfScreen = -zvector;
 
 
 %% Load data
 
 % read data folder (extract .ang files)
-dirPath = 'data\Ti_PTP\Ti_cAxis_PTP_2\'; % The folder containing your .ang files
+dirPath = 'onedriveData/Philipp/Ti_PTP/Ti_cAxis_PTP_2'; % The folder containing your .ang files
 filePattern = fullfile(dirPath, '*.ang');
 files = dir(filePattern);
 
@@ -93,7 +96,7 @@ while ~selection_confirmed
 end
 
 %% grain calc
-reforientation = orientation.byEuler(211.5*degree,75.4*degree,203.7*degree);
+reforientation = orientation.byEuler(211.5*degree,75.4*degree,203.7*degree, ebsd.CS);
 %reforientation = grains(34).meanOrientation;
 ebsd.orientations = ebsd.orientations.project2FundamentalRegion(reforientation);
 
@@ -160,12 +163,25 @@ sSAll = [sSBasal;sSPrism;sSPyraCA;sSPyraCA2;sSPyraA];
 % create dislocation systems
 dS = dislocationSystem(sSAll);
 
+
+
 %dSSymm = symmetrise(dS,'unique')
 % [norm(dS(1).b), norm(dS(12).b),1/3 * norm(ebsdSGND.CS.aAxis)]
 % [norm(dS(13).b), norm(dS(end).b),1/3 * sqrt(norm(ebsdSGND.CS.aAxis)^2+norm(ebsdSGND.CS.cAxis)^2)] %dS(end) is a screw dislocation idk what the burger there is
 
 
-%Assumption about energy of dislocations based on b and poisson ratio
+% Check if <c+a> edge and screw dislocations have the same Burgers vector norm
+ca_screw_idx = dS.isScrew & angle(dS.b,sSPyraCA2(1).b)<10^-5;
+ca_edge_idx = dS.isEdge & angle(dS.b,sSPyraCA2(1).b)<10^-5;
+if any(ca_screw_idx) && any(ca_edge_idx)
+    ca_screw_norm = max(dS(ca_screw_idx).b.norm);
+    ca_edge_norm = max(dS(ca_edge_idx).b.norm);
+    if abs(ca_screw_norm - ca_edge_norm) > 1e-4
+        warning('The norm of the <c+a> edge dislocations (%g) does not match the norm of the <c+a> screw dislocations (%g).', ca_edge_norm, ca_screw_norm);
+    end
+end
+
+% Assumption about energy of dislocations based on b and poisson ratio
 nu = 0.3;
 % energy of the screw dislocations, scales with b^2
 dS(dS.isScrew).u = dS(dS.isScrew).b.norm.^2;
@@ -174,8 +190,7 @@ dS(dS.isScrew).u = dS(dS.isScrew).b.norm.^2;
 dS(dS.isEdge).u = dS(dS.isEdge).b.norm.^2/(1 - nu);
 
 dSRot = ebsdSGND.orientations * dS;
-
-% fit dislocation systems
+%% fit dislocation systems
 [rho,factor] = fitDislocationSystems(kappa,dSRot);
 
 % the restored dislocation density tensors
