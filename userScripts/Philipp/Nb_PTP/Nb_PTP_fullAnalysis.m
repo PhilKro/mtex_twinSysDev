@@ -18,12 +18,12 @@ plottingConvention.default.outOfScreen = -zvector;
 baseDir = fullfile('onedriveData', 'Philipp', 'Nb_PTP');
 outDir  = fullfile(baseDir, 'Processed_Output');
 if ~exist(outDir, 'dir')
-    mkdir(outDir);
+    warning('directory %s does not exist', outDir)
 end
 
 % Provide the name of the MAT file containing the fully merged EBSD & DIC 
 % data from the Undeformed script
-undeformed_dic_mat = fullfile(outDir, 'insitu Specimen 1 0 Map Data 1_BW263_20260319_144702Processing_subset=25_step=8_undeformedEBSD_withAllDIC.mat');
+undeformed_dic_mat = fullfile(outDir, 'insitu Specimen 1 0 Map Data 1_BW263_20260320_101109Processing_subset=25_step=8_undeformedEBSD_withAllDIC.mat');
 
 % Define increments (mapping TKD .ang files to concurrent DIC .hdf5 prefixes)
 increments = struct();
@@ -71,8 +71,8 @@ minSize = 1000;
 alpha = 1;
 
 %% -------------------------------------------------------------------------
-%% PART 2: SSLIP Calculation on Undeformed Data + DIC
-%% -------------------------------------------------------------------------
+% PART 2: SSLIP Calculation on Undeformed Data + DIC
+% -------------------------------------------------------------------------
 sslip_mat_path = fullfile(outDir, sprintf('SSLIP_Data_%s.mat', currentInc.dic_prefix));
 
 if exist(sslip_mat_path, 'file')
@@ -91,8 +91,6 @@ else
     
     % Clean and reconstruct grains
     ebsdUndef(ebsdUndef.ci < thresh_ci) = 'notIndexed';
-    [grainsUndef, ebsdUndef.grainId] = calcGrains(ebsdUndef, 'minPixel', minSize, 'angle', grainThresh, 'alpha', alpha);
-    ebsdUndef(grainsUndef(grainsUndef.numPixel <= minSize)) = 'notIndexed';
     [grainsUndef, ebsdUndef.grainId] = calcGrains(ebsdUndef, 'minPixel', minSize, 'angle', grainThresh, 'alpha', alpha);
     
     % Setup blank container for the fully combined SSLIP field
@@ -127,16 +125,18 @@ else
         IDoptions.threshResidual = 0.02;
         IDoptions.minEeff = 0.01;
         IDoptions.posConstr = 1;
-        IDoptions.plotSSLIP = 0;
+        IDoptions.plotSSLIP = 1;
         IDoptions.saveFig = 0;
         IDoptions.plotDefGrad = 0;
         IDoptions.plotResidual = 0;
         IDoptions.NoSs = 1:length(sS_BCC);
+        IDoptions.stress = stressTensor.uniaxial(yvector);      
         
         % Perform SSLIP locally
         [ebsdID_g, optOut] = SSLIP(ebsd_g, U, V, sSLocal_g, IDoptions);
         
         % Stitch local map back into the full ebsd grid using XY coordinates
+        warning('The intersect between the ebsdId and ebsdID_g coordinates does not exist. The positions of x and y might be recalculated somewhere in SSLIP?')
         [~, idx_all, idx_g] = intersect([ebsdID.x(:), ebsdID.y(:)], [ebsdID_g.x(:), ebsdID_g.y(:)], 'rows');
         ebsdID.prop.slipIDcor(:, idx_all) = ebsdID_g.prop.slipIDcor(:, idx_g);
     end
@@ -145,8 +145,8 @@ else
 end
 
 %% -------------------------------------------------------------------------
-%% PART 3: GND Calculation on Pristine Deformed TKD Data
-%% -------------------------------------------------------------------------
+% PART 3: GND Calculation on Pristine Deformed TKD Data
+% -------------------------------------------------------------------------
 gnd_mat_path = fullfile(outDir, sprintf('GND_Data_%s.mat', currentInc.dic_prefix));
 
 if exist(gnd_mat_path, 'file')
@@ -177,13 +177,12 @@ else
     
     % Clean and reconstruct grains
     [grainsDef, ebsdDeformed.grainId] = calcGrains(ebsdDeformed, 'minPixel', minSize, 'angle', grainThresh, 'alpha', alpha);
-    ebsdDeformed(grainsDef(grainsDef.numPixel <= minSize)) = 'notIndexed';
-    [grainsDef, ebsdDeformed.grainId] = calcGrains(ebsdDeformed, 'minPixel', minSize, 'angle', grainThresh, 'alpha', alpha);
-    
+
     % GND Processing (Filtered to remove noise artifacts)
     fprintf('  -> Computing curvature and fitting dislocations...\n');
     F = halfQuadraticFilter;
-    ebsdSGND = smooth(ebsdDeformed('indexed'), F, 'fill', grainsDef);
+    F.alpha=3;
+    ebsdSGND = gridify(smooth(ebsdDeformed('indexed'), F));
     kappa = ebsdSGND.curvature;
     
     dS = dislocationSystem.bcc(ebsdDeformed.CS);
@@ -199,8 +198,8 @@ else
 end
 
 %% -------------------------------------------------------------------------
-%% PART 4: Visualizing the comparison
-%% -------------------------------------------------------------------------
+% PART 4: Visualizing the comparison
+% -------------------------------------------------------------------------
 fprintf('Plotting comparison side-by-side...\n');
 
 % 1. Find the top SSLIP system globally across the map

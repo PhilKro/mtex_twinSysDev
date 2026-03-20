@@ -11,7 +11,7 @@ plottingConvention.default.outOfScreen = -zvector;
 
 %% define a crystal orientation and slip systems
 dir = fullfile('onedriveData','Philipp','Nb_PTP', 'Processed_Output');
-matname = 'insitu Specimen 1 0 Map Data 1_BW263_20260319_144702Processing_subset=25_step=8_undeformedEBSD_withAllDIC';
+matname = 'insitu Specimen 1 0 Map Data 1_BW263_20260320_101109Processing_subset=25_step=8_undeformedEBSD_withAllDIC';
 load(fullfile(dir, [matname,'.mat']))
 
 %% calc grains
