@@ -135,10 +135,18 @@ else
         % Perform SSLIP locally
         [ebsdID_g, optOut] = SSLIP(ebsd_g, U, V, sSLocal_g, IDoptions);
         
-        % Stitch local map back into the full ebsd grid using XY coordinates
-        warning('The intersect between the ebsdId and ebsdID_g coordinates does not exist. The positions of x and y might be recalculated somewhere in SSLIP?')
-        [~, idx_all, idx_g] = intersect([ebsdID.x(:), ebsdID.y(:)], [ebsdID_g.x(:), ebsdID_g.y(:)], 'rows');
-        ebsdID.prop.slipIDcor(:, idx_all) = ebsdID_g.prop.slipIDcor(:, idx_g);
+        % Stitch local map back into the full ebsd grid using nearest neighbor 
+        % mapping, since SSLIP's coarse-graining changes the grid coordinates
+        % and truncates edges.
+        in_grain_idx = find(ebsdID.grainId == gId);
+        xq = ebsdID.x(in_grain_idx);
+        yq = ebsdID.y(in_grain_idx);
+        
+        xc = ebsdID_g.x(:);
+        yc = ebsdID_g.y(:);
+        
+        idx_nearest = knnsearch([xc, yc], [xq, yq]);
+        ebsdID.prop.slipIDcor(:, in_grain_idx) = ebsdID_g.prop.slipIDcor(:, idx_nearest);
     end
     
     save(sslip_mat_path, 'ebsdID', 'sSLocalRef', 'optOut');
@@ -202,42 +210,75 @@ end
 % -------------------------------------------------------------------------
 fprintf('Plotting comparison side-by-side...\n');
 
-% 1. Find the top SSLIP system globally across the map
-sslip_activity_sum = sum(abs(ebsdID.prop.slipIDcor), 2, 'omitnan');
-[~, max_sslip_idx] = max(sslip_activity_sum);
-sS_max = sSLocalRef(max_sslip_idx); 
-sslip_data = abs(ebsdID.prop.slipIDcor(max_sslip_idx, :));
+% Define the layout shape for each group (e.g., [2, 2] means a 2x2 block 
+% of SSLIPs next to a 2x2 block of GNDs, creating a total 2x4 field).
+plot_layout = [2, 2];
+num_top = prod(plot_layout);
 
-% 2. Find the top GND system
+% 1. Find the top SSLIP systems globally across the map
+sslip_activity_sum = sum(abs(ebsdID.prop.slipIDcor), 2, 'omitnan');
+[~, sorted_sslip_idx] = sort(sslip_activity_sum, 'descend');
+top_sslip_idx = sorted_sslip_idx(1:num_top);
+
+% Determine global color limit for the top SSLIP systems to unify their colorbars
+sslip_max_vals = zeros(num_top, 1);
+for i = 1:num_top
+    ssdata = abs(ebsdID.prop.slipIDcor(top_sslip_idx(i), :));
+    sslip_max_vals(i) = prctile(ssdata(ssdata > 0), 98);
+end
+global_sslip_max = max(sslip_max_vals);
+if isnan(global_sslip_max) || global_sslip_max <= 0, global_sslip_max = 1e-4; end
+
+% 2. Find the top GND systems
 gnd_density_sum = sum(abs(rho), 1, 'omitnan');
-[~, max_gnd_idx] = max(gnd_density_sum);
-dS_max = dS(max_gnd_idx);
-gnd_data = factor * abs(rho(:, max_gnd_idx));
+[~, sorted_gnd_idx] = sort(gnd_density_sum, 'descend');
+top_gnd_idx = sorted_gnd_idx(1:num_top);
 
 figH = figure;
-newMtexFigure('layout', [1, 2]);
+newMtexFigure('layout', [plot_layout(1), plot_layout(2) * 2]);
 
-% Left Panel: SSLIP Output
-nextAxis;
 [grainsUndefPlot, ~] = calcGrains(ebsdID, 'minPixel', minSize, 'angle', grainThresh);
-plot(ebsdID, sslip_data, 'micronbar', 'off');
-hold on;
-plot(grainsUndefPlot.boundary, 'linewidth', 1.5, 'linecolor', 'w');
-mtexColorMap viridis;
-caxis([0, prctile(sslip_data(sslip_data > 0), 98)]); % Trim top 2% of extreme artifacts
-mtexColorbar('title', 'Slip Activity (\gamma)');
-title(sprintf('Top SSLIP System:\nb=[%s] n=(%s)', char(sS_max.b.round), char(sS_max.n.round)));
 
-% Right Panel: GND Output
-nextAxis;
-plot(ebsdDeformed, log10(gnd_data), 'micronbar', 'off');
-hold on;
-plot(grainsDef.boundary, 'linewidth', 1.5, 'linecolor', 'w');
-mtexColorMap parula;
-caxis([14.5, 16.5]); % Limits mapped for typical log10(m^-2) densities
-mtexColorbar('title', 'log_{10}(GND Density m^{-2})');
-typeStr = {'Edge', 'Screw'};
-title(sprintf('Top GND System:\n%s, b=[%s] l=[%s]', typeStr{2 - dS_max.isEdge}, char(dS_max.b.round), char(dS_max.l.round)));
+for i = 1:num_top
+    % Determine row and column indices for the current sub-block
+    row_idx = ceil(i / plot_layout(2));
+    col_idx = mod(i - 1, plot_layout(2)) + 1;
+    
+    % Left Panel: SSLIP Output
+    nextAxis(row_idx, col_idx);
+    sS_max = sSLocalRef(top_sslip_idx(i)); 
+    sslip_data = abs(ebsdID.prop.slipIDcor(top_sslip_idx(i), :));
+    
+    plot(ebsdID, sslip_data, 'micronbar', 'off');
+    hold on;
+    plot(grainsUndefPlot.boundary, 'linewidth', 1.5, 'linecolor', 'w');
+    mtexColorMap viridis;
+    
+    % Apply unified global color limits across all SSLIP subplots
+    caxis([0, global_sslip_max]);
+    
+    cb = mtexColorbar;
+    if i == 1, cb.Title.String = 'Slip Activity (\gamma)'; end
+    title(sprintf('Rank %d SSLIP System:\nb=[%s] n=(%s)', i, char(sS_max.b.round), char(sS_max.n.round)));
+    
+    % Right Panel: GND Output
+    % Offset the column index by the width of the SSLIP block
+    nextAxis(row_idx, col_idx + plot_layout(2));
+    dS_max = dS(top_gnd_idx(i));
+    gnd_data = factor * abs(rho(:, top_gnd_idx(i)));
+    
+    plot(ebsdDeformed, log10(gnd_data), 'micronbar', 'off');
+    hold on;
+    plot(grainsDef.boundary, 'linewidth', 1.5, 'linecolor', 'w');
+    mtexColorMap parula;
+    caxis([14.5, 16.5]); % Limits mapped for typical log10(m^-2) densities
+    
+    cb = mtexColorbar;
+    if i == 1, cb.Title.String = 'log_{10}(GND Density m^{-2})'; end
+    
+    typeStr = {'Edge', 'Screw'};
+    title(sprintf('Rank %d GND System:\n%s, b=[%s] l=[%s]', i, typeStr{2 - dS_max.isEdge}, char(dS_max.b.round), char(dS_max.l.round)));
+end
 
 drawNow(gcm, 'figSize', 'large');
 
