@@ -1,6 +1,8 @@
 %% clear workspace
 
-clear 
+if ~exist('is_master_run', 'var')
+    clear 
+end
 close all
 
 plotx2east
@@ -26,13 +28,15 @@ defaults.DIC_filename = 'Processing_subset=21_step=6';
 
 % ----- Input structs -----
 
-%     % Increment 0
-% input = struct( ...
-%     'fname',             'insitu Specimen 1 0 Map Data 1', ...    % base EBSD filename (no extension)                   
-%     'SEImagefname',      '0_10kv_DIC.tif', ...          % SE image filename
-%     'DICfoldername' ,    fullfile('DIC_h5', defaults.DIC_filename),... % DIC HDF5 filename
-%     'DICfname',          'B0001.hdf5',... % folder under defaults.dir containing DIC .h5 file
-%     'sel_points_fname', 'insitu Specimen 1 0 Map Data 1_BW263_20251126_115536_Selection_Points_Backup_EBSD.mat'); % mat file with preselected points for alignment                     
+if ~exist('input', 'var')
+    % Default to Increment 0 if not provided by Master script
+    input = struct( ...
+        'fname',             'insitu Specimen 1 0 Map Data 1', ...    % base EBSD filename (no extension)                   
+        'SEImagefname',      '0_10kv_DIC.tif', ...          % SE image filename
+        'DICfoldername' ,    fullfile('DIC_h5', defaults.DIC_filename),... % DIC HDF5 filename
+        'DICfname',          'B0001.hdf5',... % folder under defaults.dir containing DIC .h5 file
+        'sel_points_fname', 'insitu Specimen 1 0 Map Data 1_BW263_20251126_115536_Selection_Points_Backup_EBSD.mat'); % mat file with preselected points for alignment                     
+end
 
 %     % Increment 1
 % input = struct( ...

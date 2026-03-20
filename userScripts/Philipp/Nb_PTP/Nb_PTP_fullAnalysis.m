@@ -5,7 +5,9 @@
 %
 % It loads previously processed data if available to save computational time.
 
-clear
+if ~exist('is_master_run', 'var')
+    clear
+end
 close all
 
 %% Initialization & Mtex Preferences
@@ -23,7 +25,9 @@ end
 
 % Provide the name of the MAT file containing the fully merged EBSD & DIC 
 % data from the Undeformed script
-undeformed_dic_mat = fullfile(outDir, 'insitu Specimen 1 0 Map Data 1_BW263_20260320_101109Processing_subset=25_step=8_undeformedEBSD_withAllDIC.mat');
+if ~exist('undeformed_dic_mat', 'var')
+    undeformed_dic_mat = fullfile(outDir, 'insitu Specimen 1 0 Map Data 1_BW263_20260320_101109Processing_subset=25_step=8_undeformedEBSD_withAllDIC.mat');
+end
 
 % Define increments (mapping TKD .ang files to concurrent DIC .hdf5 prefixes)
 increments = struct();
@@ -57,7 +61,9 @@ increments(7).ang_file = 'insitu Specimen 1 7 Map Data 7_BW263.ang';
 increments(7).dic_prefix = 'B0014';
 
 % Choose which increment to analyze right now (1 through 7)
-inc_idx = 4;
+if ~exist('inc_idx', 'var')
+    inc_idx = 4;
+end
 currentInc = increments(inc_idx);
 fprintf('\n========================================\n');
 fprintf('Analyzing %s (DIC Prefix: %s)\n', currentInc.name, currentInc.dic_prefix);
@@ -234,17 +240,16 @@ gnd_density_sum = sum(abs(rho), 1, 'omitnan');
 [~, sorted_gnd_idx] = sort(gnd_density_sum, 'descend');
 top_gnd_idx = sorted_gnd_idx(1:num_top);
 
-figH = figure;
-newMtexFigure('layout', [plot_layout(1), plot_layout(2) * 2]);
+% Figure 1: Top SSLIP systems
+figSSLIP = figure;
+newMtexFigure('layout', plot_layout);
 
 [grainsUndefPlot, ~] = calcGrains(ebsdID, 'minPixel', minSize, 'angle', grainThresh);
 
 for i = 1:num_top
-    % Determine row and column indices for the current sub-block
     row_idx = ceil(i / plot_layout(2));
     col_idx = mod(i - 1, plot_layout(2)) + 1;
     
-    % Left Panel: SSLIP Output
     nextAxis(row_idx, col_idx);
     sS_max = sSLocalRef(top_sslip_idx(i)); 
     sslip_data = abs(ebsdID.prop.slipIDcor(top_sslip_idx(i), :));
@@ -254,16 +259,26 @@ for i = 1:num_top
     plot(grainsUndefPlot.boundary, 'linewidth', 1.5, 'linecolor', 'w');
     mtexColorMap viridis;
     
-    % Apply unified global color limits across all SSLIP subplots
-    caxis([0, global_sslip_max]);
-    
-    cb = mtexColorbar;
-    if i == 1, cb.Title.String = 'Slip Activity (\gamma)'; end
     title(sprintf('Rank %d SSLIP System:\nb=[%s] n=(%s)', i, char(sS_max.b.round), char(sS_max.n.round)));
+end
+
+setColorRange([0, global_sslip_max]);
+mtexColorbar('title', 'Slip Activity (\gamma)');
+drawNow(gcm, 'figSize', 'large');
+
+figPathSSLIP = fullfile(outDir, sprintf('Top_SSLIP_%s.jpg', currentInc.dic_prefix));
+exportScaledFigure(gcf, figPathSSLIP, 'nodatestring', 'target_px', 3500);
+fprintf('Saved SSLIP figure to %s\n', figPathSSLIP);
+
+% Figure 2: Top GND systems
+figGND = figure;
+newMtexFigure('layout', plot_layout);
+
+for i = 1:num_top
+    row_idx = ceil(i / plot_layout(2));
+    col_idx = mod(i - 1, plot_layout(2)) + 1;
     
-    % Right Panel: GND Output
-    % Offset the column index by the width of the SSLIP block
-    nextAxis(row_idx, col_idx + plot_layout(2));
+    nextAxis(row_idx, col_idx);
     dS_max = dS(top_gnd_idx(i));
     gnd_data = factor * abs(rho(:, top_gnd_idx(i)));
     
@@ -271,17 +286,15 @@ for i = 1:num_top
     hold on;
     plot(grainsDef.boundary, 'linewidth', 1.5, 'linecolor', 'w');
     mtexColorMap parula;
-    caxis([14.5, 16.5]); % Limits mapped for typical log10(m^-2) densities
-    
-    cb = mtexColorbar;
-    if i == 1, cb.Title.String = 'log_{10}(GND Density m^{-2})'; end
     
     typeStr = {'Edge', 'Screw'};
     title(sprintf('Rank %d GND System:\n%s, b=[%s] l=[%s]', i, typeStr{2 - dS_max.isEdge}, char(dS_max.b.round), char(dS_max.l.round)));
 end
 
+setColorRange([14.5, 16.5]); % Limits mapped for typical log10(m^-2) densities
+mtexColorbar('title', 'log_{10}(GND Density m^{-2})');
 drawNow(gcm, 'figSize', 'large');
 
-figPath = fullfile(outDir, sprintf('Comparison_SSLIP_vs_GND_%s.png', currentInc.dic_prefix));
-exportScaledFigure(gcf, figPath, 'nodatestring');
-fprintf('Saved comparison figure to %s\n', figPath);
+figPathGND = fullfile(outDir, sprintf('Top_GND_%s.jpg', currentInc.dic_prefix));
+exportScaledFigure(gcf, figPathGND, 'nodatestring', 'target_px', 3500);
+fprintf('Saved GND figure to %s\n', figPathGND);
