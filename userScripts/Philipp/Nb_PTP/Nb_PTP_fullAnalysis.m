@@ -17,10 +17,17 @@ plottingConvention.default.east = xvector;
 plottingConvention.default.outOfScreen = -zvector;
 
 %% 1. Directories and Input Setup
-baseDir = fullfile('onedriveData', 'Philipp', 'Nb_PTP');
+% Use pwd to create an absolute path and bypass OneDrive relative path bugs
+if exist('master_pwd', 'var')
+    baseDir = fullfile(master_pwd, 'onedriveData', 'Philipp', 'Nb_PTP');
+else
+    warning('No master_pwd exists taking native one.')
+    baseDir = fullfile(pwd, 'onedriveData', 'Philipp', 'Nb_PTP');
+end
 outDir  = fullfile(baseDir, 'Processed_Output');
 if ~exist(outDir, 'dir')
-    warning('directory %s does not exist', outDir)
+    mkdir(outDir);
+    fprintf('Created missing directory: %s\n', outDir);
 end
 
 % Provide the name of the MAT file containing the fully merged EBSD & DIC 
@@ -29,42 +36,46 @@ if ~exist('undeformed_dic_mat', 'var')
     undeformed_dic_mat = fullfile(outDir, 'insitu Specimen 1 0 Map Data 1_BW263_20260320_101109Processing_subset=25_step=8_undeformedEBSD_withAllDIC.mat');
 end
 
-% Define increments (mapping TKD .ang files to concurrent DIC .hdf5 prefixes)
-increments = struct();
-
-increments(1).name = 'Increment 0';
-increments(1).ang_file = 'insitu Specimen 1 0 Map Data 1_BW263.ang';
-increments(1).dic_prefix = 'B0001';
-
-increments(2).name = 'Increment 1';
-increments(2).ang_file = 'insitu Specimen 1 1 Map Data 2_BW263.ang';
-increments(2).dic_prefix = 'B0003';
-
-increments(3).name = 'Increment 2';
-increments(3).ang_file = 'insitu Specimen 1 2 Map Data 3_BW263.ang';
-increments(3).dic_prefix = 'B0005';
-
-increments(4).name = 'Increment 3';
-increments(4).ang_file = 'insitu Specimen 1 3 Map Data 4_BW263.ang';
-increments(4).dic_prefix = 'B0007';
-
-increments(5).name = 'Increment 4';
-increments(5).ang_file = 'insitu Specimen 1 4 Map Data 5_BW263.ang';
-increments(5).dic_prefix = 'B0009';
-
-increments(6).name = 'Increment 5';
-increments(6).ang_file = 'insitu Specimen 1 5 Map Data 6_BW263.ang';
-increments(6).dic_prefix = 'B0011';
-
-increments(7).name = 'Increment 6';
-increments(7).ang_file = 'insitu Specimen 1 7 Map Data 7_BW263.ang';
-increments(7).dic_prefix = 'B0014';
+if ~exist('is_master_run', 'var')
+    % Skip block if this is called by the master runner script 
+    % Define increments (mapping TKD .ang files to concurrent DIC .hdf5 prefixes)
+    increments = struct();
+    
+    increments(1).name = 'Increment 0';
+    increments(1).ang_file = 'insitu Specimen 1 0 Map Data 1_BW263.ang';
+    increments(1).dic_prefix = 'B0001';
+    
+    increments(2).name = 'Increment 1';
+    increments(2).ang_file = 'insitu Specimen 1 1 Map Data 2_BW263.ang';
+    increments(2).dic_prefix = 'B0003';
+    
+    increments(3).name = 'Increment 2';
+    increments(3).ang_file = 'insitu Specimen 1 2 Map Data 3_BW263.ang';
+    increments(3).dic_prefix = 'B0005';
+    
+    increments(4).name = 'Increment 3';
+    increments(4).ang_file = 'insitu Specimen 1 3 Map Data 4_BW263.ang';
+    increments(4).dic_prefix = 'B0007';
+    
+    increments(5).name = 'Increment 4';
+    increments(5).ang_file = 'insitu Specimen 1 4 Map Data 5_BW263.ang';
+    increments(5).dic_prefix = 'B0009';
+    
+    increments(6).name = 'Increment 5';
+    increments(6).ang_file = 'insitu Specimen 1 5 Map Data 6_BW263.ang';
+    increments(6).dic_prefix = 'B0011';
+    
+    increments(7).name = 'Increment 6';
+    increments(7).ang_file = 'insitu Specimen 1 7 Map Data 7_BW263.ang';
+    increments(7).dic_prefix = 'B0014';
+end
 
 % Choose which increment to analyze right now (1 through 7)
-if ~exist('inc_idx', 'var')
+if ~exist('is_master_run', 'var')
     inc_idx = 4;
+    currentInc = increments(inc_idx);
 end
-currentInc = increments(inc_idx);
+
 fprintf('\n========================================\n');
 fprintf('Analyzing %s (DIC Prefix: %s)\n', currentInc.name, currentInc.dic_prefix);
 fprintf('========================================\n');
@@ -81,19 +92,26 @@ alpha = 1;
 % -------------------------------------------------------------------------
 sslip_mat_path = fullfile(outDir, sprintf('SSLIP_Data_%s.mat', currentInc.dic_prefix));
 
-if exist(sslip_mat_path, 'file')
-    fprintf('Loading existing SSLIP data from %s...\n', sslip_mat_path);
+% if exist(sslip_mat_path, 'file')
+try 
+    % error()
     load(sslip_mat_path, 'ebsdID', 'sSLocalRef', 'optOut');
-else
+    fprintf('Loading existing SSLIP data from %s...\n', sslip_mat_path);
+%else
+catch
     fprintf('Calculating SSLIP data for %s...\n', currentInc.name);
     
-    if ~exist(undeformed_dic_mat, 'file')
+    if ~exist(undeformed_dic_mat, 'file') && ~exist('is_master_run', 'var') 
         error('Undeformed EBSD with DIC data not found at %s.', undeformed_dic_mat);
     end
     
     % Load aligned base data
-    undefData = load(undeformed_dic_mat, 'newEBSD');
-    ebsdUndef = undefData.newEBSD;
+    if ~exist('is_master_run', 'var')
+        undefData = load(undeformed_dic_mat, 'newEBSD');
+        ebsdUndef = undefData.newEBSD;
+    else
+        ebsdUndef = newEBSD;
+    end
     
     % Clean and reconstruct grains
     ebsdUndef(ebsdUndef.ci < thresh_ci) = 'notIndexed';
@@ -163,10 +181,13 @@ end
 % -------------------------------------------------------------------------
 gnd_mat_path = fullfile(outDir, sprintf('GND_Data_%s.mat', currentInc.dic_prefix));
 
-if exist(gnd_mat_path, 'file')
-    fprintf('Loading existing GND data from %s...\n', gnd_mat_path);
+% if exist(gnd_mat_path, 'file')
+try
+    % error()
     load(gnd_mat_path, 'ebsdDeformed', 'rho', 'factor', 'dSRot', 'dS', 'grainsDef');
-else
+    fprintf('Loading existing GND data from %s...\n', gnd_mat_path);
+% else
+catch
     fprintf('Calculating GND data for %s...\n', currentInc.name);
     
     ang_path = fullfile(baseDir, currentInc.ang_file);
@@ -218,7 +239,7 @@ fprintf('Plotting comparison side-by-side...\n');
 
 % Define the layout shape for each group (e.g., [2, 2] means a 2x2 block 
 % of SSLIPs next to a 2x2 block of GNDs, creating a total 2x4 field).
-plot_layout = [2, 2];
+plot_layout = [4, 4];
 num_top = prod(plot_layout);
 
 % 1. Find the top SSLIP systems globally across the map
@@ -257,6 +278,12 @@ for i = 1:num_top
     plot(ebsdID, sslip_data, 'micronbar', 'off');
     hold on;
     plot(grainsUndefPlot.boundary, 'linewidth', 1.5, 'linecolor', 'w');
+    
+    % Plot slip trace and slip direction rotated for each local grain
+    sSLocal_grains = grainsUndefPlot.meanOrientation * sS_max;
+    quiver(grainsUndefPlot, sSLocal_grains.trace, 'color', 'r', 'linewidth', 2);
+    quiver(grainsUndefPlot, sSLocal_grains.b.normalize, 'color', 'w', 'linewidth', 2);
+    
     mtexColorMap viridis;
     
     title(sprintf('Rank %d SSLIP System:\nb=[%s] n=(%s)', i, char(sS_max.b.round), char(sS_max.n.round)));
@@ -267,7 +294,7 @@ mtexColorbar('title', 'Slip Activity (\gamma)');
 drawNow(gcm, 'figSize', 'large');
 
 figPathSSLIP = fullfile(outDir, sprintf('Top_SSLIP_%s.jpg', currentInc.dic_prefix));
-exportScaledFigure(gcf, figPathSSLIP, 'nodatestring', 'target_px', 3500);
+exportScaledFigure(gcf, figPathSSLIP, 'target_px', 3500);
 fprintf('Saved SSLIP figure to %s\n', figPathSSLIP);
 
 % Figure 2: Top GND systems
@@ -296,5 +323,5 @@ mtexColorbar('title', 'log_{10}(GND Density m^{-2})');
 drawNow(gcm, 'figSize', 'large');
 
 figPathGND = fullfile(outDir, sprintf('Top_GND_%s.jpg', currentInc.dic_prefix));
-exportScaledFigure(gcf, figPathGND, 'nodatestring', 'target_px', 3500);
+exportScaledFigure(gcf, figPathGND, 'target_px', 3500);
 fprintf('Saved GND figure to %s\n', figPathGND);
