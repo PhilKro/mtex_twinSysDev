@@ -13,7 +13,7 @@ master_pwd = pwd;
 undeformed_dic_mat = fullfile(master_pwd, 'onedriveData', 'Philipp', 'Nb_PTP', 'Processed_Output', 'insitu Specimen 1 0 Map Data 1_BW263_20260320_101109Processing_subset=25_step=8_undeformedEBSD_withAllDIC.mat');
 
 % Choose which increments to run (e.g. 1 through 6)
-increments_to_run = 2:3; 
+increments_to_run = 1:7; 
 
 try
     load(undeformed_dic_mat);

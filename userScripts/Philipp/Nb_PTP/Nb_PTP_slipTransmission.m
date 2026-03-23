@@ -26,21 +26,21 @@ analyses(1).ss2_rank   = 2;
 
 analyses(2).dic_prefix = 'B0005';
 analyses(2).grain1_id  = 2;
-analyses(2).ss1_rank   = 1;
+analyses(2).ss1_rank   = 2;
 analyses(2).grain2_id  = 1;
-analyses(2).ss2_rank   = 2;
+analyses(2).ss2_rank   = 1;
 
 analyses(3).dic_prefix = 'B0005';
 analyses(3).grain1_id  = 2;
-analyses(3).ss1_rank   = 1;
+analyses(3).ss1_rank   = 4;
 analyses(3).grain2_id  = 1;
-analyses(3).ss2_rank   = 4;
+analyses(3).ss2_rank   = 1;
 
 analyses(4).dic_prefix = 'B0005';
 analyses(4).grain1_id  = 2;
-analyses(4).ss1_rank   = 1;
+analyses(4).ss1_rank   = 5;
 analyses(4).grain2_id  = 1;
-analyses(4).ss2_rank   = 5;
+analyses(4).ss2_rank   = 1;
 %% 4. Analysis loop
 for i_analysis = 1:length(analyses)
     current_analysis = analyses(i_analysis);
@@ -115,8 +115,9 @@ for i_analysis = 1:length(analyses)
     % Plot slip traces (red) and slip directions/Burgers vectors (white)
     quiver(grainsUndef(grain1_id), sSLocal_1.trace, 'color', 'r', 'linewidth', 3);
     quiver(grainsUndef(grain2_id), sSLocal_2.trace, 'color', 'r', 'linewidth', 3);
-    quiver(grainsUndef(grain1_id), sSLocal_1.b.normalize, 'color', 'w', 'linewidth', 3);
-    quiver(grainsUndef(grain2_id), sSLocal_2.b.normalize, 'color', 'w', 'linewidth', 3);
+    warning('Somehow make the bs vector3ds antipodal otherwise they dont plot.')
+    quiver(grainsUndef(grain1_id), sSLocal_1.b.normalize, 'color', 'b', 'linewidth', 3);
+    quiver(grainsUndef(grain2_id), sSLocal_2.b.normalize, 'color', 'b', 'linewidth', 3);
 
     % Create text for the info box instead of title to prevent cut-offs
     info_str = sprintf('Prefix %s\nG%d (Rank %d): b=[%s] n=(%s)\nG%d (Rank %d): b=[%s] n=(%s)', ...
