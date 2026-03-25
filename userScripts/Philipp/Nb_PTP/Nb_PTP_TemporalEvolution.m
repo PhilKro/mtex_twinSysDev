@@ -73,6 +73,8 @@ misorientation_g1 = nan(num_steps, 1);
 misorientation_g2 = nan(num_steps, 1);
 total_slip_activity_g1 = nan(num_steps, 1);
 total_slip_activity_g2 = nan(num_steps, 1);
+residual_eff_g1 = nan(num_steps, 1);
+residual_eff_g2 = nan(num_steps, 1);
 
 % Lazily load undeformed EBSD only if we need to calculate missing SSLIP data
 ebsdUndef_loaded = false;
@@ -140,6 +142,13 @@ for i = 1:num_steps
     total_slip_activity_g1(i) = total_slip_g1;
     total_slip_activity_g2(i) = total_slip_g2;
     
+    if isfield(ebsdID_loop.prop, 'residualEeff')
+        residual_eff_g1(i) = sum(ebsdID_loop.prop.residualEeff(mask_g1_loop(:)), 'omitnan');
+        residual_eff_g2(i) = sum(ebsdID_loop.prop.residualEeff(mask_g2_loop(:)), 'omitnan');
+    else
+        warning('residualEeff not found for increment %s.', prefix);
+    end
+
     if total_slip_g1 > 0
         pct_activity_g1(i, :) = (slip_mags_g1(top4_g1_loop) / total_slip_g1) * 100;
         abs_activity_g1(i, :) = slip_mags_g1(top4_g1_loop);
@@ -173,7 +182,8 @@ end
 % Save output array so you don't have to rerun the analysis
 save(fullfile(outDir, 'TemporalEvolution_Data.mat'), 'dic_prefixes', 'pct_activity_g1', ...
     'pct_activity_g2', 'abs_activity_g1', 'abs_activity_g2', 'total_slip_activity_g1', ...
-    'total_slip_activity_g2', 'misorientation_g1', 'misorientation_g2', 'top4_g1', ...
+    'total_slip_activity_g2', 'residual_eff_g1', 'residual_eff_g2', ...
+    'misorientation_g1', 'misorientation_g2', 'top4_g1', ...
     'top4_g2', 'sSLocalRef', 'g1_id', 'g2_id', 'num_steps');
 
 %% 4. Plotting
@@ -208,8 +218,11 @@ nextAxis(2, 1); plot_panel(x_axis, dic_prefixes, sprintf('Grain %d: Top 4 SSLIP 
 nextAxis(1, 2); plot_panel(x_axis, dic_prefixes, sprintf('Grain %d: Top 4 SSLIP Systems (Abs)', g1_id), leg_g1, abs_activity_g1, 'Absolute Slip Activity (\gamma)'); set(gca, 'YScale', 'log'); xtickangle(45);
 nextAxis(2, 2); plot_panel(x_axis, dic_prefixes, sprintf('Grain %d: Top 4 SSLIP Systems (Abs)', g2_id), leg_g2, abs_activity_g2, 'Absolute Slip Activity (\gamma)'); set(gca, 'YScale', 'log'); xtickangle(45);
 
-nextAxis(1, 3); plot_panel(x_axis, dic_prefixes, sprintf('Grain %d: Total Slip Activity', g1_id), {'Total Slip \Sigma|\gamma|'}, total_slip_activity_g1, 'Total Slip \Sigma|\gamma|'); xtickangle(45);
-nextAxis(2, 3); plot_panel(x_axis, dic_prefixes, sprintf('Grain %d: Total Slip Activity', g2_id), {'Total Slip \Sigma|\gamma|'}, total_slip_activity_g2, 'Total Slip \Sigma|\gamma|'); xtickangle(45);
+% nextAxis(1, 3); plot_panel(x_axis, dic_prefixes, sprintf('Grain %d: Total Slip Activity', g1_id), {'Total Slip \Sigma|\gamma|'}, total_slip_activity_g1, 'Total Slip \Sigma|\gamma|'); xtickangle(45);
+% nextAxis(2, 3); plot_panel(x_axis, dic_prefixes, sprintf('Grain %d: Total Slip Activity', g2_id), {'Total Slip \Sigma|\gamma|'}, total_slip_activity_g2, 'Total Slip \Sigma|\gamma|'); xtickangle(45);
+
+nextAxis(1, 3); plot_panel(x_axis, dic_prefixes, sprintf('Grain %d: Sum of Residual Eeff', g1_id), {'\Sigma residualEeff'}, residual_eff_g1, 'Sum of Residual Eeff'); xtickangle(45);
+nextAxis(2, 3); plot_panel(x_axis, dic_prefixes, sprintf('Grain %d: Sum of Residual Eeff', g2_id), {'\Sigma residualEeff'}, residual_eff_g2, 'Sum of Residual Eeff'); xtickangle(45);
 
 nextAxis(1, 4); plot_panel(x_axis, dic_prefixes, sprintf('Grain %d: Rotation From Undeformed (Proxy for SSLIP accuracy.)', g1_id), {'Misorientation from Undeformed'}, misorientation_g1, 'Rotation Angle (\circ)'); xtickangle(45);
 nextAxis(2, 4); plot_panel(x_axis, dic_prefixes, sprintf('Grain %d: Rotation From Undeformed (Proxy for SSLIP accuracy.)', g2_id), {'Misorientation from Undeformed'}, misorientation_g2, 'Rotation Angle (\circ)'); xtickangle(45);

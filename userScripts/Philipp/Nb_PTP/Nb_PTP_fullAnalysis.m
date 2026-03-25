@@ -122,7 +122,9 @@ sslip_mat_path = fullfile(outDir, sprintf('SSLIP_Data_%s.mat', currentInc.dic_pr
 
 % if exist(sslip_mat_path, 'file')
 try 
-    % error()
+    % just throw an error if you want to run the analysis despite an
+    % existing .mat file.
+    error()
     load(sslip_mat_path, 'ebsdID', 'sSLocalRef', 'optOut');
     fprintf('Loading existing SSLIP data from %s...\n', sslip_mat_path);
 %else
