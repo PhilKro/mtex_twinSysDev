@@ -281,7 +281,6 @@ drawNow(gcm);
 fig_path = fullfile(outDir, 'TemporalEvolution_SlipAndMisorientation.jpg');
 exportScaledFigure(gcf, fig_path, 'target_px', 3500);
 fprintf('Saved dashboard figure to %s\n', fig_path);
-%%
 
 %% 5. Plot SSLIP Activity Maps for All Increments
 fprintf('\n--- Generating SSLIP Activity Maps ---\n');
@@ -338,6 +337,56 @@ for i = 1:num_steps
     end
     
     plot_sslip_activity_maps(ebsdID_loop, grainsUndef_loop, g1_id_loop, g2_id_loop, top4_g1_loop, top4_g2_loop, sSLocalRef_loop, prefix, outDir);
+end
+
+%% 6. Plot GND Activity Maps for All Increments
+fprintf('\n--- Generating GND Activity Maps ---\n');
+% Find Top 4 GND Systems based on B0005 Benchmark (if exists)
+ref_gnd_file = fullfile(outDir, sprintf('GND_Data_%s.mat', ref_prefix));
+if exist(ref_gnd_file, 'file')
+    fprintf('Loading reference benchmark GND data from %s...\n', ref_prefix);
+    gnd_ref_data = load(ref_gnd_file, 'ebsdDeformed', 'rho', 'factor', 'dS', 'grainsDef');
+    
+    gnd_density_sum = sum(abs(gnd_ref_data.rho), 1, 'omitnan');
+    [~, sorted_gnd_idx] = sort(gnd_density_sum, 'descend');
+    top4_gnd = sorted_gnd_idx(1:4);
+    dS_ref = gnd_ref_data.dS;
+    
+    fprintf('Benchmark Top 4 GND systems: %s\n', num2str(top4_gnd));
+    
+    for i = 1:num_steps
+        prefix = dic_prefixes{i};
+        gnd_file = fullfile(outDir, sprintf('GND_Data_%s.mat', prefix));
+        if ~exist(gnd_file, 'file')
+            fprintf('  -> GND data not found for %s. Skipping.\n', prefix);
+            continue;
+        end
+        
+        fprintf('  -> Processing GND maps for %s (%d/%d)...\n', prefix, i, num_steps);
+        loop_gnd = load(gnd_file, 'ebsdDeformed', 'rho', 'factor', 'dS', 'grainsDef');
+        
+        % Match GND systems across increments
+        top4_loop = zeros(4,1);
+        
+        for k = 1:4
+            for j = 1:length(loop_gnd.dS)
+                if angle(dS_ref(top4_gnd(k)).b, loop_gnd.dS(j).b, 'noSymmetry') < 1e-5 && ...
+                   angle(dS_ref(top4_gnd(k)).l, loop_gnd.dS(j).l, 'noSymmetry') < 1e-5 && ...
+                   dS_ref(top4_gnd(k)).isEdge == loop_gnd.dS(j).isEdge
+                    top4_loop(k) = j;
+                end
+            end
+        end
+        
+        if any(top4_loop == 0)
+            top4_loop(top4_loop == 0) = top4_gnd(top4_loop == 0);
+        end
+        
+        plot_gnd_activity_maps(loop_gnd.ebsdDeformed, loop_gnd.grainsDef, loop_gnd.rho, loop_gnd.factor, ...
+            top4_loop, loop_gnd.dS, prefix, outDir);
+    end
+else
+    fprintf('Reference GND data (%s) not found. Cannot determine benchmark systems.\n', ref_gnd_file);
 end
 
 %% Helper Functions
@@ -401,6 +450,38 @@ function plot_sslip_activity_maps(ebsdID, grainsUndef, g1_id, g2_id, top4_g1, to
     drawNow(gcm);
     
     fig_path = fullfile(outDir, sprintf('SSLIP_Top4_Activity_%s.jpg', prefix));
+    exportScaledFigure(fig_map, fig_path, 'target_px', 2500, 'noDateString');
+    close(fig_map); % Keep workspace clean
+end
+
+function plot_gnd_activity_maps(ebsdDeformed, grainsDef, rho, factor, top4_gnd, dS, prefix, outDir)
+    fig_map = figure;
+    fig_map.Name = sprintf('GND Activity Maps - %s', prefix);
+    newMtexFigure('layout', [2, 2], 'figSize', 'large');
+
+    for k = 1:4
+        row_idx = ceil(k/2);
+        col_idx = mod(k-1, 2) + 1;
+        nextAxis(row_idx, col_idx);
+        
+        sys_idx = top4_gnd(k);
+        dS_max = dS(sys_idx);
+        gnd_data = factor * abs(rho(:, sys_idx));
+        
+        plot(ebsdDeformed, log10(gnd_data), 'micronbar', 'off');
+        hold on;
+        plot(grainsDef.boundary, 'linewidth', 1.5, 'linecolor', 'w');
+        mtexColorMap parula;
+        
+        typeStr = {'Edge', 'Screw'};
+        title(sprintf('Rank %d GND System:\n%s, b=[%s] l=[%s]', k, typeStr{2 - dS_max.isEdge}, char(dS_max.b.round), char(dS_max.l.round)));
+    end
+    
+    setColorRange([14.5, 16.5]); % Limits mapped for typical log10(m^-2) densities
+    mtexColorbar('title', 'log_{10}(GND Density m^{-2})');
+    drawNow(gcm);
+    
+    fig_path = fullfile(outDir, sprintf('GND_Top4_Activity_%s.jpg', prefix));
     exportScaledFigure(fig_map, fig_path, 'target_px', 2500, 'noDateString');
     close(fig_map); % Keep workspace clean
 end
