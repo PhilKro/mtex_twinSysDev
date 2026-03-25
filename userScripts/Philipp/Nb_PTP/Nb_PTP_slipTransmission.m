@@ -41,6 +41,24 @@ analyses(4).grain1_id  = 2;
 analyses(4).ss1_rank   = 5;
 analyses(4).grain2_id  = 1;
 analyses(4).ss2_rank   = 1;
+
+analyses(5).dic_prefix = 'B0007';
+analyses(5).grain1_id  = 2;
+analyses(5).ss1_rank   = 2;
+analyses(5).grain2_id  = 1;
+analyses(5).ss2_rank   = 1;
+
+analyses(6).dic_prefix = 'B0007';
+analyses(6).grain1_id  = 2;
+analyses(6).ss1_rank   = 2;
+analyses(6).grain2_id  = 1;
+analyses(6).ss2_rank   = 3;
+
+% analyses(7).dic_prefix = 'B0007';
+% analyses(7).grain1_id  = 2;
+% analyses(7).ss1_rank   = 2;
+% analyses(7).grain2_id  = 1;
+% analyses(7).ss2_rank   = 3;
 %% 4. Analysis loop
 for i_analysis = 1:length(analyses)
     current_analysis = analyses(i_analysis);
@@ -115,9 +133,12 @@ for i_analysis = 1:length(analyses)
     % Plot slip traces (red) and slip directions/Burgers vectors (white)
     quiver(grainsUndef(grain1_id), sSLocal_1.trace, 'color', 'r', 'linewidth', 3);
     quiver(grainsUndef(grain2_id), sSLocal_2.trace, 'color', 'r', 'linewidth', 3);
-    warning('Somehow make the bs vector3ds antipodal otherwise they dont plot.')
-    quiver(grainsUndef(grain1_id), sSLocal_1.b.normalize, 'color', 'b', 'linewidth', 3);
-    quiver(grainsUndef(grain2_id), sSLocal_2.b.normalize, 'color', 'b', 'linewidth', 3);
+    b1 = sSLocal_1.b.normalize;
+    b2 = sSLocal_2.b.normalize;
+    b1.antipodal = true;
+    b2.antipodal = true;
+    quiver(grainsUndef(grain1_id), b1 , 'color', 'b', 'linewidth', 3);
+    quiver(grainsUndef(grain2_id), b2 , 'color', 'b', 'linewidth', 3);
 
     % Create text for the info box instead of title to prevent cut-offs
     info_str = sprintf('Prefix %s\nG%d (Rank %d): b=[%s] n=(%s)\nG%d (Rank %d): b=[%s] n=(%s)', ...
@@ -128,13 +149,13 @@ for i_analysis = 1:length(analyses)
         'Interpreter', 'none', 'BackgroundColor', 'w', 'EdgeColor', 'k', ...
         'FitBoxToText', 'on', 'FontSize', 12, 'Margin', 5);
         
-    % Prompt user
-    choice = questdlg('Does this selection look correct? (Check figure)', 'Confirm Selection', 'Yes', 'No, skip', 'Yes');
-    if strcmp(choice, 'No, skip')
-        close(fig_check);
-        fprintf('User skipped analysis %d.\n', i_analysis);
-        continue;
-    end
+    % % Prompt user
+    % choice = questdlg('Does this selection look correct? (Check figure)', 'Confirm Selection', 'Yes', 'No, skip', 'Yes');
+    % if strcmp(choice, 'No, skip')
+    %     close(fig_check);
+    %     fprintf('User skipped analysis %d.\n', i_analysis);
+    %     continue;
+    % end
 
     % 6. Calculate Slip Transmission Parameters
     % Calculate the Luster-Morris parameter (m')

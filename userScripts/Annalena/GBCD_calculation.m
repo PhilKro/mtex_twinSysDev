@@ -255,7 +255,7 @@ hold off
 gbnd = calcGBND(gB,grains,'halfwidth',7.5*degree);
 
 % GBCD for sigma boundaries
-gbcd = calcGBND(gB(isSigmaAny), grains,'halfwidth',7.5*degree);
+gbcd = calcGBND(gB(isSigmaAny), grains) %,'halfwidth',7.5*degree);
 
 % Loop through the sigmas and add up the spherical harmonics afterwards
 gbcd_reccomended = 0;
