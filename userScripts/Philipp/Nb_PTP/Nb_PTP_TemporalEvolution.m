@@ -50,6 +50,22 @@ mask_g2 = (ebsdID.grainId == g2_id);
 ori_undef_g1 = grainsUndef(g1_id).meanOrientation;
 ori_undef_g2 = grainsUndef(g2_id).meanOrientation;
 
+%% --- PLOT GRAIN IDENTIFICATION MAP ---
+fprintf('\nPlotting and saving grain identification map...\n');
+fig_grains = figure;
+fig_grains.Name = 'Grain Identification';
+plot(ebsdID, ebsdID.orientations, 'micronbar', 'off');
+hold on;
+plot(grainsUndef.boundary, 'linecolor', 'w', 'linewidth', 1.5);
+
+text(grainsUndef(g1_id), sprintf('Grain %d\n(Left)', g1_id), 'color', 'k', 'fontsize', 14, 'fontweight', 'bold', 'backgroundcolor', 'w', 'edgecolor', 'k', 'margin', 2);
+text(grainsUndef(g2_id), sprintf('Grain %d\n(Right)', g2_id), 'color', 'k', 'fontsize', 14, 'fontweight', 'bold', 'backgroundcolor', 'w', 'edgecolor', 'k', 'margin', 2);
+
+title(sprintf('Bicrystal Identification (Prefix: %s)', ref_prefix));
+fig_grains_path = fullfile(outDir, 'Grain_Identification_Map.jpg');
+exportScaledFigure(fig_grains, fig_grains_path, 'target_px', 2500, 'noDateString');
+fprintf('Saved grain identification figure to %s\n\n', fig_grains_path);
+
 % Find top 4 dominant slip systems per grain in B0005
 slip_mags_g1_ref = mean(abs(ebsdID.prop.slipIDcor(:, mask_g1(:))), 2, 'omitnan');
 slip_mags_g2_ref = mean(abs(ebsdID.prop.slipIDcor(:, mask_g2(:))), 2, 'omitnan');
@@ -62,6 +78,40 @@ top4_g2 = sort_g2(1:4);
 
 fprintf('Benchmark Top 4 systems for Grain %d: %s\n', g1_id, num2str(top4_g1'));
 fprintf('Benchmark Top 4 systems for Grain %d: %s\n', g2_id, num2str(top4_g2'));
+
+%% --- SCHMID FACTOR ANALYSIS ---
+% Assuming uniaxial tension along Y-direction based on fullAnalysis script
+sigma = stressTensor.uniaxial(yvector);
+sSLocal_g1 = ori_undef_g1 * sSLocalRef;
+sSLocal_g2 = ori_undef_g2 * sSLocalRef;
+
+SF_g1 = abs(sSLocal_g1.SchmidFactor(sigma));
+SF_g1 = SF_g1(:); % Force column vector for consistent sorting
+SF_g2 = abs(sSLocal_g2.SchmidFactor(sigma));
+SF_g2 = SF_g2(:);
+
+[SF_g1_sorted, SF_g1_rank] = sort(SF_g1, 'descend');
+[SF_g2_sorted, SF_g2_rank] = sort(SF_g2, 'descend');
+
+fprintf('\n--- Schmid Factor Analysis for Top 4 Systems (B0005) ---\n');
+for k = 1:4
+    sys_idx = top4_g1(k);
+    sf_val = SF_g1(sys_idx);
+    sf_rank = find(SF_g1_rank == sys_idx, 1);
+    delta_sf = SF_g1_sorted(1) - sf_val;
+    fprintf('Grain %d - Active Rank %d (Sys %d): SF = %.3f | SF Rank = %d (%d systems higher) | Delta SF to Max = %.3f\n', ...
+        g1_id, k, sys_idx, sf_val, sf_rank, sf_rank - 1, delta_sf);
+end
+fprintf('\n');
+for k = 1:4
+    sys_idx = top4_g2(k);
+    sf_val = SF_g2(sys_idx);
+    sf_rank = find(SF_g2_rank == sys_idx, 1);
+    delta_sf = SF_g2_sorted(1) - sf_val;
+    fprintf('Grain %d - Active Rank %d (Sys %d): SF = %.3f | SF Rank = %d (%d systems higher) | Delta SF to Max = %.3f\n', ...
+        g2_id, k, sys_idx, sf_val, sf_rank, sf_rank - 1, delta_sf);
+end
+fprintf('------------------------------------------------------\n\n');
 
 %% 3. Iterate through all increments
 num_steps = length(dic_prefixes);
@@ -231,6 +281,64 @@ drawNow(gcm);
 fig_path = fullfile(outDir, 'TemporalEvolution_SlipAndMisorientation.jpg');
 exportScaledFigure(gcf, fig_path, 'target_px', 3500);
 fprintf('Saved dashboard figure to %s\n', fig_path);
+%%
+
+%% 5. Plot SSLIP Activity Maps for All Increments
+fprintf('\n--- Generating SSLIP Activity Maps ---\n');
+
+% Ensure grain reconstruction thresholds exist if data was loaded from .mat
+if ~exist('minSize', 'var'), minSize = 1000; end
+if ~exist('grainThresh', 'var'), grainThresh = 5 * degree; end
+
+for i = 1:num_steps
+    prefix = dic_prefixes{i};
+    fprintf('  -> Processing maps for %s (%d/%d)...\n', prefix, i, num_steps);
+    
+    sslip_file = fullfile(outDir, sprintf('SSLIP_Data_%s.mat', prefix));
+    if ~exist(sslip_file, 'file')
+        warning('SSLIP data not found for %s. Skipping.', prefix);
+        continue;
+    end
+    
+    loop_data = load(sslip_file, 'ebsdID', 'sSLocalRef');
+    ebsdID_loop = loop_data.ebsdID;
+    sSLocalRef_loop = loop_data.sSLocalRef;
+    
+    % Reconstruct grains to determine left/right assignments
+    [grainsUndef_loop, ebsdID_loop.grainId] = calcGrains(ebsdID_loop, 'minPixel', minSize, 'angle', grainThresh);
+    ebsdID_loop(grainsUndef_loop(grainsUndef_loop.numPixel<=minSize)) = 'notIndexed';
+    [grainsUndef_loop, ebsdID_loop.grainId] = calcGrains(ebsdID_loop, 'minPixel', minSize, 'angle', grainThresh);
+
+    [~, sorted_grain_idx_loop] = sort(grainsUndef_loop.numPixel, 'descend');
+    top2_idx_loop = sorted_grain_idx_loop(1:2);
+    [~, left_to_right_loop] = sort(grainsUndef_loop(top2_idx_loop).centroid.x);
+    bicrystal_idx_loop = top2_idx_loop(left_to_right_loop);
+
+    g1_id_loop = grainsUndef_loop(bicrystal_idx_loop(1)).id;
+    g2_id_loop = grainsUndef_loop(bicrystal_idx_loop(2)).id;
+
+    % Find corresponding slip systems in current increment
+    top4_g1_loop = zeros(4,1);
+    top4_g2_loop = zeros(4,1);
+    
+    for k = 1:4
+        for j = 1:length(sSLocalRef_loop)
+            if angle(sSLocalRef(top4_g1(k)).b, sSLocalRef_loop(j).b, 'noSymmetry') < 1e-5 && angle(sSLocalRef(top4_g1(k)).n, sSLocalRef_loop(j).n, 'noSymmetry') < 1e-5
+                top4_g1_loop(k) = j;
+            end
+            if angle(sSLocalRef(top4_g2(k)).b, sSLocalRef_loop(j).b, 'noSymmetry') < 1e-5 && angle(sSLocalRef(top4_g2(k)).n, sSLocalRef_loop(j).n, 'noSymmetry') < 1e-5
+                top4_g2_loop(k) = j;
+            end
+        end
+    end
+    
+    if any(top4_g1_loop == 0) || any(top4_g2_loop == 0)
+        top4_g1_loop(top4_g1_loop == 0) = top4_g1(top4_g1_loop == 0);
+        top4_g2_loop(top4_g2_loop == 0) = top4_g2(top4_g2_loop == 0);
+    end
+    
+    plot_sslip_activity_maps(ebsdID_loop, grainsUndef_loop, g1_id_loop, g2_id_loop, top4_g1_loop, top4_g2_loop, sSLocalRef_loop, prefix, outDir);
+end
 
 %% Helper Functions
 function plot_panel(x_axis, dic_prefixes, title_str, leg_str, y_data_left, y_label_left)
@@ -243,4 +351,56 @@ function plot_panel(x_axis, dic_prefixes, title_str, leg_str, y_data_left, y_lab
     xticklabels(dic_prefixes);
     grid on;
     legend(leg_str, 'Location', 'best', 'Interpreter', 'none');
+end
+
+function plot_sslip_activity_maps(ebsdID, grainsUndef, g1_id, g2_id, top4_g1, top4_g2, sSLocalRef, prefix, outDir)
+    fig_map = figure;
+    fig_map.Name = sprintf('SSLIP Activity Maps - %s', prefix);
+    newMtexFigure('layout', [2, 2], 'figSize', 'large');
+
+    mask_g1 = (ebsdID.grainId == g1_id);
+    mask_g2 = (ebsdID.grainId == g2_id);
+    
+    % Find global maximum activity for consistent color scaling across all 4 ranks
+    global_max = 0;
+    for k = 1:4
+        d1 = abs(ebsdID.prop.slipIDcor(top4_g1(k), mask_g1(:)));
+        d2 = abs(ebsdID.prop.slipIDcor(top4_g2(k), mask_g2(:)));
+        global_max = max([global_max, max(d1(:)), max(d2(:))]);
+    end
+    global_max = max(1e-4, global_max); % Avoid 0 limit if perfectly empty
+
+    for k = 1:4
+        row_idx = ceil(k/2);
+        col_idx = mod(k-1, 2) + 1;
+        nextAxis(row_idx, col_idx);
+        
+        plot_data = nan(1, length(ebsdID));
+        sys_g1 = top4_g1(k);
+        sys_g2 = top4_g2(k);
+        
+        plot_data(mask_g1(:)) = abs(ebsdID.prop.slipIDcor(sys_g1, mask_g1(:)));
+        plot_data(mask_g2(:)) = abs(ebsdID.prop.slipIDcor(sys_g2, mask_g2(:)));
+        
+        plot(ebsdID, plot_data, 'micronbar', 'off');
+        mtexColorMap viridis;
+        hold on;
+        plot(grainsUndef.boundary, 'linecolor', 'w', 'linewidth', 1.5);
+        
+        % Format slip system strings
+        sS_g1 = sSLocalRef(sys_g1);
+        sS_g2 = sSLocalRef(sys_g2);
+        str_g1 = sprintf('G1 Sys %d: b=[%s] n=(%s)', sys_g1, char(sS_g1.b.round), char(sS_g1.n.round));
+        str_g2 = sprintf('G2 Sys %d: b=[%s] n=(%s)', sys_g2, char(sS_g2.b.round), char(sS_g2.n.round));
+        
+        title(sprintf('Rank %d Activity\n%s\n%s', k, str_g1, str_g2), 'Interpreter', 'none', 'FontSize', 10);
+    end
+    
+    setColorRange([0, global_max]);
+    mtexColorbar('title', 'Absolute Slip Activity (\gamma)');
+    drawNow(gcm);
+    
+    fig_path = fullfile(outDir, sprintf('SSLIP_Top4_Activity_%s.jpg', prefix));
+    exportScaledFigure(fig_map, fig_path, 'target_px', 2500, 'noDateString');
+    close(fig_map); % Keep workspace clean
 end
