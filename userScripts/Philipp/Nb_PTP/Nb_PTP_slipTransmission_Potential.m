@@ -80,7 +80,6 @@ for i_analysis = 1:length(analyses)
     [grainsUndef, ebsdID.grainId] = calcGrains(ebsdID, 'minPixel', minSize, 'angle', grainThresh);
 
     % Get the active slip system in the source grain (Grain 1)
-    sslip_activity_sum = sum(abs(ebsdID.prop.slipIDcor), 2, 'omitnan');
     sslip_activity_sum = sum(abs(ebsdID.prop.slipIDcor), 2, 'omitnan'); % Rank by magnitude
     [~, sorted_sslip_idx] = sort(sslip_activity_sum, 'descend');
     ss1_idx = sorted_sslip_idx(ss1_rank);
@@ -108,19 +107,15 @@ for i_analysis = 1:length(analyses)
     fprintf('================================================================\n');
 
     % --- Calculate primary m' and define the "Residual Mismatch Tensor" ---
-    m_prime_active = abs(cos(angle(sS_g1_active.b, sS_g2_active.b, 'noSymmetry')) * cos(angle(sS_g1_active.n, sS_g2_active.n, 'noSymmetry')));
     b1_eff = sS_g1_active.b * slip_sign_1;
     b2_eff = sS_g2_active.b * slip_sign_2;
     m_prime_active = cos(angle(b1_eff, b2_eff, 'noSymmetry')) * cos(angle(sS_g1_active.n, sS_g2_active.n, 'noSymmetry'));
     
     % Tensors for simple shear: M = b (x) n
-    M1 = sS_g1_active.b.normalize.xyz' * sS_g1_active.n.normalize.xyz;
-    M2_active = sS_g2_active.b.normalize.xyz' * sS_g2_active.n.normalize.xyz;
     M1_eff = (b1_eff.normalize.xyz)' * sS_g1_active.n.normalize.xyz;
     M2_active_eff = (b2_eff.normalize.xyz)' * sS_g2_active.n.normalize.xyz;
     
     % Boundary mismatch left over after the primary active system accommodates its share
-    H_residual = M1 - m_prime_active * M2_active;
     H_residual = M1_eff - m_prime_active * M2_active_eff;
 
     % Get all possible slip systems for the target grain (Grain 2)
@@ -142,7 +137,6 @@ for i_analysis = 1:length(analyses)
         sS_g2_current = sS_g2_all(j);
         
         % Luster-Morris parameter (m')
-        m_prime_vals(j) = abs(cos(angle(sS_g1_active.b, sS_g2_current.b, 'noSymmetry')) * cos(angle(sS_g1_active.n, sS_g2_current.n, 'noSymmetry')));
         % Compare effective incoming shear to the potential target shear. Allow for negative m'.
         m_prime_vals(j) = cos(angle(b1_eff, sS_g2_current.b, 'noSymmetry')) * cos(angle(sS_g1_active.n, sS_g2_current.n, 'noSymmetry'));
         
@@ -150,13 +144,11 @@ for i_analysis = 1:length(analyses)
         schmid_factors(j) = abs(sS_g2_current.SchmidFactor(stress));
         
         % Combined Transmission Factor
-        combined_metric(j) = m_prime_vals(j) * schmid_factors(j);
         % Use abs(m') as a large negative m' is still a strong (but opposing) geometric interaction
         combined_metric(j) = abs(m_prime_vals(j)) * schmid_factors(j);
         
         % How well does this system geometrically accommodate the remaining boundary mismatch? (Tensor Double Dot Product)
         Mj = sS_g2_current.b.normalize.xyz' * sS_g2_current.n.normalize.xyz;
-        residual_accom(j) = abs(sum(H_residual(:) .* Mj(:)));
         residual_accom(j) = sum(H_residual(:) .* Mj(:));
         
         % Out-of-plane component of Burgers vector (dot product with z-vector)
