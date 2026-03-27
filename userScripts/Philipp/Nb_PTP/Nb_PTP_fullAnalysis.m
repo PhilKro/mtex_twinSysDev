@@ -179,9 +179,7 @@ catch
         IDoptions.coarsegrain = 4;
         IDoptions.threshResidual = 0.02;
         IDoptions.minEeff = 0.01;
-        % Allow for negative slip (shear in the opposite direction on the same system)
-        % This is critical for capturing the true slip directionality.
-        IDoptions.posConstr = 0;
+        IDoptions.posConstr = 1;
         IDoptions.plotSSLIP = 1;
         IDoptions.saveFig = 0;
         IDoptions.plotDefGrad = 0;
