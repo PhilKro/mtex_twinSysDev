@@ -29,7 +29,7 @@ newEBSD.y = Ynew(:);
 
 % create new unitCell variable, to be sure.
 unitCellXY = calcUnitCell([Xnew(:) - mean(Xnew(:)),Ynew(:) - mean(Ynew(:))]);
-warning('warpCreateEBSDdata: this assignment will break at some point when calcUnitCell is fixed to returen a vector3d')
+warning('warpCreateEBSDdata: this assignment will break at some point when calcUnitCell is fixed to returen a vector3d. Can we use EBSD.updateUnitCell instead? ')
 newEBSD.unitCell = vector3d(unitCellXY(:,1),unitCellXY(:,2), zeros(size(unitCellXY(:,2))));
 
 % idNearest is not returned by interp, at least not in MTEX 6.1.1
