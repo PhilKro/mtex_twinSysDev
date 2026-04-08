@@ -23,11 +23,6 @@ activity_threshold = 0.00005; % Minimum mean activity to consider a system for c
 use_trace_angle = true; % Set to true to cluster by trace angle, false for plane normal angle
 % -----------------------------
 
-% ---------------------------------------------------------
-% Manually specify which clusters to plot side-by-side in section 4:
-manual_g1_cluster_idx = 1; % E.g., Cluster 1 from Grain 1
-manual_g2_cluster_idx = 1; % E.g., Cluster 2 from Grain 2
-% ---------------------------------------------------------
 
 %% 2. Load Data
 % Load Undeformed EBSD for CI backdrop
@@ -56,6 +51,26 @@ if ~exist(sslip_mat_path, 'file')
 end
 fprintf('Loading SSLIP data for %s...\n', dic_prefix);
 load(sslip_mat_path, 'ebsdID', 'sSLocalRef');
+
+% --- Apply Specimen Mask ---
+mask_file_undef = fullfile(baseDir, 'insitu Specimen 1 0 Map Data 1_BW263_specimen_mask.mat');
+if exist(mask_file_undef, 'file')
+    fprintf('Applying specimen mask to remove vacuum artifacts...\n');
+    load(mask_file_undef, 'specimenlocation');
+    % Map the 1D original mask to the aligned/warped dataset using 'oldId'
+    if isfield(ebsdID.prop, 'oldId')
+        old_id = ebsdID.prop.oldId;
+        valid_id = ~isnan(old_id);
+        mask_aligned = false(size(old_id));
+        mask_aligned(valid_id) = specimenlocation(old_id(valid_id));
+        ebsdID(~mask_aligned) = 'notIndexed';
+        ebsdUndef(~mask_aligned) = 'notIndexed';
+    else
+        warning('ebsdID lacks ''oldId''. Cannot apply specimen mask.');
+    end
+else
+    warning('No specimen mask found for Increment 0. Proceeding with unmasked data.');
+end
 
 % Reconstruct grains
 grainThresh = 5 * degree;
@@ -91,6 +106,13 @@ clusters_g2 = cluster_and_plot(g2_id, slip_mags_g2, sSLocal_2, mask_g2, ebsdID, 
 
 fprintf('\nFinished processing all clusters.\n');
 
+
+%% ---------------------------------------------------------
+% Manually specify which clusters to plot side-by-side in section 4:
+manual_g1_cluster_idx = 1; % E.g., Cluster 1 from Grain 1
+manual_g2_cluster_idx = 1; % E.g., Cluster 2 from Grain 2
+% ---------------------------------------------------------
+
 %% 4. Manual Combined Cluster Plotting
 
 if ~isempty(clusters_g1) && ~isempty(clusters_g2) && manual_g1_cluster_idx <= length(clusters_g1) && manual_g2_cluster_idx <= length(clusters_g2)
@@ -99,6 +121,11 @@ if ~isempty(clusters_g1) && ~isempty(clusters_g2) && manual_g1_cluster_idx <= le
     
     % Plot CI Backdrop
     plot(ebsdUndef, cibw, 'micronbar', 'off');
+    hold on;
+    
+    % Plot black backgound
+    plot(ebsdUndef, zeros(size(cibw)), 'micronbar', 'off');
+    warning('CI background replaced with black background.')
     hold on;
 
     % Combine slip data for G1
@@ -119,9 +146,11 @@ if ~isempty(clusters_g1) && ~isempty(clusters_g2) && manual_g1_cluster_idx <= le
     plot_data = nan(1, length(ebsdID));
     plot_data(mask_g1) = combined_slip_g1(mask_g1);
     plot_data(mask_g2) = combined_slip_g2(mask_g2);
-    plot(ebsdID, plot_data, 'micronbar', 'off', 'FaceAlpha', 0.65);
+    plot(ebsdID, plot_data, 'micronbar', 'off'); %, 'FaceAlpha', 0.65);
     
     mtexColorMap viridis;
+
+    plot(grainsUndef.boundary, 'linecolor', 'w', 'linewidth', 1.5);
     
     % Plot traces
     main_sys_g1 = clusters_g1{manual_g1_cluster_idx}(1);
@@ -163,7 +192,9 @@ if ~isempty(clusters_g1) && ~isempty(clusters_g2) && manual_g1_cluster_idx <= le
         'Interpreter', 'none', 'BackgroundColor', [1 1 1 0.8], 'EdgeColor', 'k', ...
         'FitBoxToText', 'on', 'FontSize', 10, 'Margin', 5, 'VerticalAlignment', 'bottom');
 
-    setColorRange('equal');
+    % setColorRange('equal');
+    % setColorRange([0,0.15])
+    setColorRange([0,0.025])
     mtexColorbar('title', 'Combined Slip Activity (\gamma)');
 
     if use_trace_angle, ang_suffix = 't'; else, ang_suffix = 'n'; end
@@ -256,14 +287,19 @@ function clusters = cluster_and_plot(grain_id, slip_mags, sSLocal, mask, ebsdID,
         % Plot CI Backdrop
         plot(ebsdUndef, cibw, 'micronbar', 'off');
         hold on;
+
+        plot(ebsdUndef, zeros(size(cibw)), 'micronbar', 'off');
+        warning('CI background replaced with black background.')
+        hold on;
         
         % Plot Combined Slip Activity
         plot_data = nan(size(combined_slip));
         plot_data(mask) = combined_slip(mask);
-        plot(ebsdID, plot_data, 'micronbar', 'off', 'FaceAlpha', 0.65);
+        plot(ebsdID, plot_data, 'micronbar', 'off'); %, 'FaceAlpha', 0.65);
+        hold on
         
         mtexColorMap viridis;
-        % plot(grainsUndef.boundary, 'linecolor', 'w', 'linewidth', 1.5);
+        plot(grainsUndef.boundary, 'linecolor', 'w', 'linewidth', 1.5);
         
         % Plot main trace and b
         main_sys_idx = cluster_indices(1);

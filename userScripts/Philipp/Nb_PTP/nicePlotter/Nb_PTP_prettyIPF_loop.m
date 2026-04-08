@@ -104,6 +104,16 @@ for i = 1:length(angFiles)
     ebsd = rotate(ebsd, rotation.byAxisAngle(xvector, -70*degree + tkd_tilt), 'keepXY');
     ebsd(ebsd.ci < thresh_ci) = 'notIndexed';
     ebsd = rotate(ebsd, rotation.byAxisAngle(zvector, 180*degree), 'keepXY');
+    
+    ebsd_1D = ebsd; % Keep 1D version for coordinate matching
+    
+    % --- Apply Specimen Mask to base EBSD ---
+    mask_file = fullfile(baseDir, sprintf('%s_specimen_mask.mat', baseName));
+    if exist(mask_file, 'file')
+        load(mask_file, 'specimenlocation');
+        ebsd(~specimenlocation) = 'notIndexed';
+    end
+    
     ebsd = ebsd.gridify;
     
     % --- Calculate Tuned CI Greyscale (Curves Adjustment) ---
@@ -253,6 +263,24 @@ for i = 1:length(angFiles)
             rho = gnd_data.rho;
             factor = gnd_data.factor;
             dS = gnd_data.dS;
+            
+            % --- Apply Specimen Mask to GND EBSD and Recalculate Grains ---
+            if exist(mask_file, 'file')
+                % Map the 1D mask via coordinates since ebsdSGND might be gridified
+                valid_sgnd = ~isnan(ebsdSGND.x) & ~isnan(ebsdSGND.y);
+                sgnd_x = ebsdSGND.x(valid_sgnd);
+                sgnd_y = ebsdSGND.y(valid_sgnd);
+                
+                idx = knnsearch([ebsd_1D.x, ebsd_1D.y], [sgnd_x, sgnd_y]);
+                
+                sgnd_mask = false(size(ebsdSGND));
+                sgnd_mask(valid_sgnd) = specimenlocation(idx);
+                
+                ebsdSGND(~sgnd_mask) = 'notIndexed';
+            end
+            
+            fprintf('  Recalculating grains for GNDs (to exclude vacuum artifacts)...\n');
+            [grainsDef, ebsdSGND.grainId] = calcGrains(ebsdSGND, 'minPixel', 1000, 'angle', 5*degree);
         
         % Total Edge and Screw
         GND_E = factor * sum(abs(rho(:, dS.isEdge)), 2, 'omitnan');
@@ -293,8 +321,8 @@ for i = 1:length(angFiles)
         exportScaledFigure(fig_es, fullfile(outDir, sprintf('%s_GND_Total_nocolorbar.jpg', baseName)), 'noDateString');
         close(fig_es);
         
-        warning('skipping individual screw/edge plotting etc')
-        continue
+        % warning('skipping individual screw/edge plotting etc')
+        % continue
 
         % Plot 1: Total Edge and Screw Densities
         fig_es = figure('Name', 'Total Edge and Screw GNDs', 'Visible', 'off');
@@ -375,6 +403,8 @@ for i = 1:length(angFiles)
             else
                 plot(ebsdSGND, log10(GND_Tot_b(:, b_idx)), 'micronbar', 'off');
             end
+            hold on;
+            plot(grainsDef.boundary, 'linecolor', 'w', 'linewidth', 1.5);
             mtexColorMap parula;
             setColorRange(gnd_limits);
             title(sprintf('Total GNDs b=[%s]', char(b_ref(b_idx).round)));

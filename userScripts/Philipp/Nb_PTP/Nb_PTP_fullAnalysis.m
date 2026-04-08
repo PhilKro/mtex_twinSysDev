@@ -125,7 +125,7 @@ sslip_mat_path = fullfile(outDir, sprintf('SSLIP_Data_%s.mat', currentInc.dic_pr
 try 
     % just throw an error if you want to run the analysis despite an
     % existing .mat file.
-    error()
+    % error()
     load(sslip_mat_path, 'ebsdID', 'sSLocalRef', 'optOut');
     fprintf('Loading existing SSLIP data from %s...\n', sslip_mat_path);
 %else
@@ -144,6 +144,21 @@ catch
         ebsdUndef = newEBSD;
     end
     
+    % Attempt to load and apply specimen mask to the Undeformed EBSD
+    mask_file_undef = fullfile(baseDir, 'insitu Specimen 1 0 Map Data 1_BW263_specimen_mask.mat');
+    if exist(mask_file_undef, 'file')
+        fprintf('Applying specimen mask to undeformed data...\n');
+        load(mask_file_undef, 'specimenlocation');
+        if isfield(ebsdUndef.prop, 'oldId')
+            % Map the 1D original mask to the aligned/warped dataset
+            old_id = ebsdUndef.prop.oldId;
+            valid_id = ~isnan(old_id);
+            mask_undef = false(size(old_id));
+            mask_undef(valid_id) = specimenlocation(old_id(valid_id));
+            ebsdUndef(~mask_undef) = 'notIndexed';
+        end
+    end
+
     % Clean and reconstruct grains
     ebsdUndef(ebsdUndef.ci < thresh_ci) = 'notIndexed';
     [grainsUndef, ebsdUndef.grainId] = calcGrains(ebsdUndef, 'minPixel', minSize, 'angle', grainThresh, 'alpha', alpha);
@@ -275,7 +290,7 @@ if ~isempty(currentInc.ang_file)
             load(mask_file, 'specimenlocation');
             ebsdDeformed.prop.specimenlocation = specimenlocation;
             % Filter the EBSD map completely before grain reconstruction
-            ebsdDeformed(ebsd.prop.specimenlocation) = 'notIndexed';
+            ebsdDeformed(~ebsdDeformed.prop.specimenlocation) = 'notIndexed';
         else
             warning('No specimen mask found for %s. Proceeding with unmasked data.', currentInc.name);
         end
