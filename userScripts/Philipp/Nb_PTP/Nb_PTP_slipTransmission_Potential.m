@@ -25,23 +25,23 @@ analyses(1).sg_ss_idx  = 27; % Index of the active slip system in the source gra
 analyses(1).tg_id      = 1; % Target grain ID
 analyses(1).tg_ss_rank = 18; % Actual active target system rank for comparison
 
-analyses(2).dic_prefix = 'B0005';
-analyses(2).sg_id      = 2;
-analyses(2).sg_ss_idx  = 11;
-analyses(2).tg_id      = 1; 
-analyses(2).tg_ss_rank = 18;
-
-analyses(3).dic_prefix = 'B0005';
-analyses(3).sg_id      = 2;
-analyses(3).sg_ss_idx  = 47;
-analyses(3).tg_id      = 1; 
-analyses(3).tg_ss_rank = 18;
-
-analyses(4).dic_prefix = 'B0005';
-analyses(4).sg_id      = 2;
-analyses(4).sg_ss_idx  = [36,24];
-analyses(4).tg_id      = 1; 
-analyses(4).tg_ss_rank = 18;
+% analyses(2).dic_prefix = 'B0005';
+% analyses(2).sg_id      = 2;
+% analyses(2).sg_ss_idx  = 11;
+% analyses(2).tg_id      = 1; 
+% analyses(2).tg_ss_rank = 18;
+% 
+% analyses(3).dic_prefix = 'B0005';
+% analyses(3).sg_id      = 2;
+% analyses(3).sg_ss_idx  = 47;
+% analyses(3).tg_id      = 1; 
+% analyses(3).tg_ss_rank = 18;
+% 
+% analyses(4).dic_prefix = 'B0005';
+% analyses(4).sg_id      = 2;
+% analyses(4).sg_ss_idx  = [36,24];
+% analyses(4).tg_id      = 1; 
+% analyses(4).tg_ss_rank = 18;
 
 % analyses(5).dic_prefix = 'B0005';
 % analyses(5).sg_id      = 2;
@@ -413,6 +413,7 @@ for i_analysis = 1:length(analyses)
     plot(ebsdID, activity_map, 'micronbar', 'off'); 
     mtexColorMap viridis;
     setColorRange([0,0.15])
+    mtexColorbar
 
     plot(grainsUndef.boundary, 'linecolor', 'w', 'linewidth', 1.5);
     %text(grainsUndef, grainsUndef.id, 'color', 'w', 'fontsize', 14);
