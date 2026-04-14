@@ -111,7 +111,7 @@ classdef twinSystem
                 % Type I twin is defined by a reflection in the K1 plane.
                 % For centrosymmetric crystals, this is equivalent to a 180-degree rotation about the normal to K1.
                 warning('twinSystem:parentTwinMisorientation:type1Assumption', ...
-                    'The current implementation works with an improper rotation here. For orientation analysis this might not work (especially if you work with a centrosymmteric point group). Maybe the proper rotation should be implemented here aswell/instead?');
+                    'The current implementation works with an improper rotation here. For orientation analysis this might not work (especially if you work with a non-centrosymmteric point group). Maybe the proper rotation should be implemented here aswell/instead?');
                 misori(isType1OrCompound) = -orientation.byAxisAngle(tS.k1(isType1OrCompound), pi);
             end
             % Type II (2)
@@ -202,7 +202,8 @@ classdef twinSystem
             if isscalar(tS)
                 switch tS.twinType
                     case 0
-                        typeName = "Compound";
+                        % typeName = "Compound";
+                        typeName = "Type I+II";
                     case 1
                         typeName = "Type I";
                     case 2
@@ -226,7 +227,7 @@ classdef twinSystem
         function dispData(tS)
             if isa(tS.CS, 'crystalSymmetry')
                 typeNames = strings(length(tS.eta1),1);
-                typeNames(tS.twinType == 0) = "Compound";
+                typeNames(tS.twinType == 0) = "Type I+II"; % "Compound";
                 typeNames(tS.twinType == 1) = "Type I";
                 typeNames(tS.twinType == 2) = "Type II";
 
@@ -447,7 +448,7 @@ classdef twinSystem
             if tS1.CS ~= tS2.CS, l = false; return; end
             
             %% CHECK IF CORRECT
-            warning('twinSystem:eq:correctness','TODO: check if the implementation of twinSystem/eq is correct.')
+            warning('twinSystem:eq:correctness','TODO: The implementation of twinSystem/eq is incorrect/incomplete. No differentiation of variants.')
             ops = tS1.CS.quaternion;
             l = any( (ops * tS1.k1) == tS2.k1 & (ops * tS1.eta1) == tS2.eta1 );
         end
@@ -606,5 +607,189 @@ classdef twinSystem
                 disp("Provide a cubic CS for this method")
             end
         end
+    end
+
+    methods (Static, Access = private)
+        
+        %% --- UTILITY MATH FUNCTIONS ---
+        
+        function res = is_int(x)
+            % Check if number(s) is an integer within floating point tolerance
+            res = all(abs(x - round(x)) < 1e-6);
+        end
+        
+        function res = is_sameodd(p)
+            % Check if the coordinates are all odd, or all even
+            d = 0.5;
+            ceven = all(twinSystem.is_int(p * d));
+            codd = all(twinSystem.is_int((p - 1) * d));
+            res = ceven || codd;
+        end
+        
+        %% --- SELECTION RULES ---
+        
+        function res = is_FCC_Dir(dir)
+            uvw = dir.uvw;
+            res = twinSystem.is_int(sum(uvw));
+        end
+        
+        function res = is_BCC_Dir(dir)
+            uvw = dir.uvw;
+            res = twinSystem.is_sameodd(2 * uvw);
+        end
+        
+        function res = is_FCC_Rec(plane)
+            hkl = plane.hkl;
+            res = twinSystem.is_sameodd(hkl);
+        end
+        
+        function res = is_BCC_Rec(plane)
+            hkl = plane.hkl;
+            res = twinSystem.is_int(sum(hkl) * 0.5);
+        end
+        
+        %% --- DIOPHANTINE SOLVER ---
+        
+        function [OZ1, U, V] = Bezout3D(plane)
+            % BEZOUT3D Finds a specific solution to the Diophantine equation
+            % for a plane (hkl) and provides basis vectors U and V for the null space.
+            hkl = round(plane.hkl);
+            h = hkl(1); k = hkl(2); l = hkl(3);
+            CS = plane.CS;
+            
+            % Extended Euclidean Algorithm
+            [g, a, b] = gcd(h, k);
+            [G, c, d] = gcd(g, l);
+            
+            % OZ1 is a solution such that h*u + k*v + l*w = G (ideally 1 for primitive planes)
+            u = c * a;
+            v = c * b;
+            w = d;
+            OZ1 = Miller(u, v, w, CS, 'uvw');
+            
+            % U and V form a basis for the plane (U.hkl = 0, V.hkl = 0)
+            if g ~= 0
+                U = Miller(k/g, -h/g, 0, CS, 'uvw');
+                V = Miller(a*l/G, b*l/G, -g/G, CS, 'uvw');
+            else
+                % If h=0 and k=0, then the plane is (0,0,l)
+                U = Miller(1, 0, 0, CS, 'uvw');
+                V = Miller(0, 1, 0, CS, 'uvw');
+            end
+        end
+        
+        %% --- BASIS VECTOR MINIMIZATION ---
+        
+        function [oz2, Ures, Vres] = findUV(U, V, structName)
+            % Finds the smallest integer/half-integer directions belonging to the U,V plane
+            CS = U.CS;
+            oz2 = Miller(0, 0, 0, CS, 'uvw');
+            
+            if strcmpi(structName, 'FCC')
+                u_fcc = twinSystem.is_FCC_Dir(U);
+                v_fcc = twinSystem.is_FCC_Dir(V);
+                if u_fcc && v_fcc
+                    Ures = U; Vres = V;
+                elseif u_fcc && ~v_fcc
+                    Ures = U; Vres = 2 * V; oz2 = V;
+                elseif v_fcc && ~u_fcc
+                    Ures = 2 * U; Vres = V; oz2 = U;
+                else
+                    Ures = U - V; Vres = U + V; oz2 = U;
+                end
+            elseif strcmpi(structName, 'BCC')
+                u_bcc = twinSystem.is_BCC_Dir(U);
+                v_bcc = twinSystem.is_BCC_Dir(V);
+                if u_bcc && v_bcc
+                    Ures = U; Vres = V;
+                elseif u_bcc && ~v_bcc
+                    Ures = U; Vres = 2 * V; oz2 = V;
+                elseif v_bcc && ~u_bcc
+                    Ures = 2 * U; Vres = V; oz2 = U;
+                else
+                    Ures = U - V; Vres = U + V; oz2 = U;
+                end
+            else
+                Ures = U; Vres = V;
+            end
+        end
+        
+        function [oz2, Hres, Kres] = findHK(H, K, structName)
+            % Finds the smallest integer/half-integer planes belonging to the H,K zone
+            CS = H.CS;
+            oz2 = Miller(0, 0, 0, CS, 'hkl');
+            
+            if strcmpi(structName, 'FCC')
+                h_fcc = twinSystem.is_FCC_Rec(H);
+                k_fcc = twinSystem.is_FCC_Rec(K);
+                if h_fcc && k_fcc
+                    Hres = H; Kres = K;
+                elseif h_fcc && ~k_fcc
+                    Hres = H; Kres = 2 * K; oz2 = K;
+                elseif k_fcc && ~h_fcc
+                    Hres = 2 * H; Kres = K; oz2 = H;
+                else
+                    Hres = H - K; Kres = H + K; oz2 = H;
+                end
+            elseif strcmpi(structName, 'BCC')
+                h_bcc = twinSystem.is_BCC_Rec(H);
+                k_bcc = twinSystem.is_BCC_Rec(K);
+                if h_bcc && k_bcc
+                    Hres = H; Kres = K;
+                elseif h_bcc && ~k_bcc
+                    Hres = H; Kres = 2 * K; oz2 = K;
+                elseif k_bcc && ~h_bcc
+                    Hres = 2 * H; Kres = K; oz2 = H;
+                else
+                    Hres = H - K; Kres = H + K; oz2 = H;
+                end
+            else
+                Hres = H; Kres = K;
+            end
+        end
+        
+        %% --- SHEAR HELPER METRICS ---
+        
+        function [G_dir, G_rec] = getMetricTensors(CS)
+            % Builds the direct and reciprocal metric tensors dynamically from MTEX axes
+            a = Miller(1, 0, 0, CS, 'uvw').xyz;
+            b = Miller(0, 1, 0, CS, 'uvw').xyz;
+            c = Miller(0, 0, 1, CS, 'uvw').xyz;
+            
+            % 3x3 matrix where columns are orthonormal spatial basis vectors
+            M = [a, b, c]; 
+            G_dir = M' * M;
+            G_rec = inv(G_dir);
+        end
+        
+        function res = ShearBevisCrocker(C, CS)
+            % C = correspondence matrix
+            [G_dir, G_rec] = twinSystem.getMetricTensors(CS);
+            res2 = trace(G_rec * C' * G_dir * C) - 3;
+            if res2 >= 0
+                res = sqrt(res2);
+            else
+                res = 0;
+            end
+        end
+        
+        function res = ShearMyFormula(F, CS)
+            % F = distortion matrix
+            [G_dir, G_rec] = twinSystem.getMetricTensors(CS);
+            I = eye(3);
+            res = sqrt(trace(G_dir * (F - I) * G_rec * (F - I)'));
+        end
+        
+        function res = ShearMyFormulaB(F, CS)
+            [G_dir, ~] = twinSystem.getMetricTensors(CS);
+            I = eye(3);
+            res = sqrt(trace((F - I)' * G_dir * (F - I)));
+        end
+        
+        function res = ShearMyFormulaC(F, CS)
+            [G_dir, G_rec] = twinSystem.getMetricTensors(CS);
+            res = sqrt(trace(G_dir * F * G_rec * F') - 3);
+        end
+        
     end
 end

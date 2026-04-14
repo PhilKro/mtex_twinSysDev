@@ -8,8 +8,7 @@ tS_sym = tS_1121.symmetrise;
 tS_sym(2)
 % slippy_the_SlipSystem = slipSystem.basal(cs);
 
-parentOri_1 = orientation.byEuler(1,1,1,cs);
-parentOri_2 = orientation.byEuler(2,1,2,cs);
+8
 
 % Create dummy EBSD (2x2 grid)
 [x,y] = meshgrid(0:1,0:1);
@@ -100,5 +99,12 @@ multitwinned_Twins.orientation
 %%------------------
 % WORKS UNTIL HERE
 %%------------------
-%% TODO next prompt going down the rabbit hole (or maybe blocking this by introducing a "isMultiplied" property that stops the user from going here)
+
+
+%% TODO going down the rabbit hole (or maybe blocking this by introducing a "isMultiplied" property that stops the user from going here)
 % okay what happens if i symmetrise a activated twin system. that should be no problem right. the parent of the symmetrised twins will be the same and makes physical sense (should cause no problems, please think of problems that could arise??). right now these properties get chugged out during symmetrization. however if this twinSystem is the parent of another, how would that be handled, either some recursive stuff (or better forbid it, what do you think)
+% Implement bcc {112} and {332} twinning
+% Implement “trace” method, as with slip system
+% After “Activation”, miller indices still shown? K1 in specimen coords?
+% Tensors output should be in proper mtex classes, e.g. displacement/deformationGradientTensor (can be converted to strain easily with mtex)
+% Subsref doesn’t work on “extracted” parent twinning systems. e.g. tsPrimary = ori * twinSys; tsSecond = tsPrimary * twinSys; parentSys = tsSecond.parent; parentSys(1:3);

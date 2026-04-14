@@ -1,29 +1,43 @@
-doc/html
-*.mat
-*~
-*swp
-*swo
-*.directory
-*.orig
-help/mtex/*
-help/tmp/*
-!data/testgrains.mat
-/myToken.txt
-resources/*
-*.asv
-myScripts
-/data/Neper/neper.log
-/data/Neper/ori_in.txt
-/data/Neper/my100GrSlice.ori
-/data/Neper/my100GrSlice.tess
-/data/Neper/my100grains.ori
-/data/Neper/my100grains.stpoly
-/data/Neper/my100grains.tess
-.mailmap
-gitTricks.md
-/extern/chebfun
+# ==========================================
+# MTEX Working Environment Ignore List
+# ==========================================
 
-# Image and vector graphic files
+# 1. HDF5 & Heavy Data Files
+*.hdf5
+*.h5
+*.h5oina
+*.tdms
+*.tdms_index
+*.pack
+*.dat
+*.csv
+*.idx
+*.pdb
+*.out
+*.int
+
+# 2. MATLAB Specific & Exceptions
+*.mat
+!data/testgrains.mat
+*.asv
+*~
+
+# 3. EBSD / XRD / MTEX Scan & Data Files
+*.ang
+*.ctf
+*.tess
+*.zap
+*.gpol
+*.stpoly
+*.mtex
+*.uxd
+*.xrdml
+*.cpf
+*.ply
+*.obj
+*.ori
+
+# 4. Images & Vector Graphics
 *.png
 *.jpg
 *.jpeg
@@ -34,4 +48,39 @@ gitTricks.md
 *.svg
 *.eps
 *.pdf
-*.ang
+
+# 5. Neper Specific Files
+/data/Neper/neper.log
+/data/Neper/ori_in.txt
+/data/Neper/my100GrSlice.ori
+/data/Neper/my100GrSlice.tess
+/data/Neper/my100grains.ori
+/data/Neper/my100grains.stpoly
+/data/Neper/my100grains.tess
+
+# 6. Specific MTEX Directories & External Tools
+doc/html
+help/mtex/*
+help/tmp/*
+resources/*
+myScripts/
+/extern/chebfun
+
+# 7. Personal & Temp Files
+/myToken.txt
+.mailmap
+gitTricks.md
+*swp
+*swo
+*.directory
+*.orig
+
+# 8. Presentations, Documents & Archives
+*.pptx
+*.zip
+*.lyx
+*.odg
+
+# 9. OS Generated Files
+.DS_Store
+Thumbs.db

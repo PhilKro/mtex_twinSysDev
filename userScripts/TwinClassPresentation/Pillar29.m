@@ -15,17 +15,26 @@ plotzIntoPlane
 %% 1. Load and Pre-process Data
 disp('Loading and pre-processing EBSD data...');
 
-% Define file name and crystal symmetry for Rhenium
-% Please ensure the .ang file is in the MATLAB path.
+
+
+% Pillar 29
 fname = 'userScripts/TwinClassPresentation/pillar29 Specimen 3 Site 1 Map Data 3_BW158.ang';
 CS = crystalSymmetry('6/mmm',[2.761 2.761 4.458],'x||a','mineral','Re');
+tS = twinSystem.hexagonal_1121_0001(CS);
+
+% fname = 'userScripts/TwinClassPresentation/2024-04-30_Kamila TKD Ti Specimen 3 Site 2 Map Data 10_BW123.ang';
+% CS = crystalSymmetry('6/mmm',[2.95 2.95 4.68],'x||a','mineral','Ti');
+% tS = twinSystem.hexagonal_1122_1124(CS);
+% 
+% fname = 'userScripts/TwinClassPresentation/Re_c_Axis_PTP_2 Specimen 2 Site 3 Map Data 6_BW123.ang';
+% CS = crystalSymmetry('6/mmm',[2.761 2.761 4.458],'x||a','mineral','Re');
+% tS = twinSystem.hexagonal_1121_0001(CS);
 
 % Load EBSD data
 ebsd = EBSD.load(fname, CS, 'convertEuler2SpatialReferenceFrame','setting 2');
 
 % Clean data based on a confidence index (CI) threshold
 ebsd(ebsd.ci < 0.15) = 'notIndexed';
-
 tkd_tilt = -20 * degree;
 % Perform corrections for tkd tilt and misaligned axes
 ebsd = rotate(ebsd,rotation.byAxisAngle(xvector,-70*degree + tkd_tilt),'keepXY');
@@ -42,6 +51,7 @@ colors = ipf.orientation2color(ebsd.orientations);
 
 figure;
 plot(ebsd,colors)
+exportScaledFigure(gcf, [fname, 'ebsd.png'])
 %% 2. Grain Reconstruction
 disp('Reconstructing grains...');
 
@@ -58,9 +68,10 @@ grains = smooth(grains, 5);
 
 % Plot reconstructed grains
 figure;
-plot(grains, grains.meanOrientation);
+grainColors = ipf.orientation2color(grains.meanOrientation);
+plot(grains, grainColors);
 title('Reconstructed Grains in Rhenium Sample');
-
+exportScaledFigure(gcf, [fname, 'grains.png'])
 %% 3. Identify Parent Grain and Define Twin Systems
 disp('Identifying parent grain and defining twin systems...');
 
@@ -69,11 +80,8 @@ disp('Identifying parent grain and defining twin systems...');
 parentGrain = grains(parentId);
 parentGrains = grains(angle(parentGrain.meanOrientation, grains.meanOrientation) < 8*degree);
 
-% Create a twinSystem object for the {11-21} twinning in Rhenium
-tS_1121 = twinSystem.hexagonal_1121_0001(CS);
-
 % Symmetrise to get all unique twin variants
-tS_sym = tS_1121.symmetrise;
+tS_sym = tS.symmetrise;
 
 % Generate the first layer of twins from the parent grain
 grain_sym_twin = parentGrain * tS_sym;
@@ -95,7 +103,7 @@ primary_twin_oris = grain_sym_twin.orientation;
 secondary_twin_oris = analysis_twin.orientation;
 
 % Define tolerance for orientation matching
-tolerance = 8 * degree;
+tolerance = 10* degree;
 
 % Initialize logical arrays to classify grains
 isPrimary = false(length(grains), 1);
@@ -150,7 +158,7 @@ colors = lines(length(primary_twin_oris));
 
 % Plot the parent grain in a grey tone
 plot(parentGrains, 'facecolor', [0.8 0.8 0.8]);
-text(parentGrains, 'P', 'BackgroundColor', 'w', 'HorizontalAlignment', 'center');
+text(parentGrains, 'P', 'HorizontalAlignment', 'center');
 
 % Plot the identified primary twins with variant-specific colors
 primaryGrains = grains(isPrimary);
@@ -167,7 +175,7 @@ for v_idx = 1:length(uniqueVariants)
     if ~isempty(grainsOfVariant)
         hold on
         plot(grainsOfVariant, 'facecolor', colors(variant,:));
-        text(grainsOfVariant, ['PV' num2str(variant)], 'HorizontalAlignment', 'center');
+        text(grainsOfVariant, ['T' num2str(variant)], 'HorizontalAlignment', 'center');
     end
 end
 
@@ -184,4 +192,5 @@ end
 hold off
 title('Primary and Secondary Twin Analysis of Rhenium');
 legend off % Hide legend for clarity
+exportScaledFigure(gcf, [fname, 'TwinId.png'])
 

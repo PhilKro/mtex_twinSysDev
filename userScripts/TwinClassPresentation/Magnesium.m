@@ -24,7 +24,7 @@ pairs = grains.neighbors;
 mori = inv(grains(pairs(:,1)).meanOrientation) .* grains(pairs(:,2)).meanOrientation;
 
 % check for twin relationship
-isTwin = min(angle_outer(mori, [tS_sym.parentTwinMisorientation]), [], 2) < 5*degree;
+isTwin = min(angle_outer(mori, [tS_sym.parentTwinMisorientation],'noSym2'), [], 2) < 5*degree;
 
 % group grains
 G = graph(pairs(isTwin,1), pairs(isTwin,2), [], length(grains));
@@ -37,11 +37,11 @@ title('Twin Related Grain Clusters')
 
 %% Identify Parent Grains
 % Weights for criteria: [Size, Variants, InteractionWork]
-weights = [0, 0, 1]; 
+weights = [1,1, 0]; 
 
 % Stress tensor for Interaction Work (Tension along Y)
 sigma = stressTensor.uniaxial(yvector);
-%sigma = - stressTensor.uniaxial(yvector);
+% sigma = stressTensor.uniaxial(yvector);
 
 % Initialize results
 parentIds = [];
@@ -98,7 +98,7 @@ for i = 1:max(componentId)
         
         % Determine twin variants
         ptm = tS_sym.parentTwinMisorientation;
-        [minAng, vIdx] = min(angle_outer(mori, ptm), [], 2);
+        [minAng, vIdx] = min(angle_outer(mori, ptm,'noSym2'), [], 2);
         
         % Filter for valid twins
         isTwinRel = minAng < 5*degree;
@@ -150,3 +150,100 @@ if ~isempty(parentStats)
         1:size(parentStats,1), 'UniformOutput', false);
     text(grains(loc), txt, 'color','w','FontSize', 12, 'FontWeight', 'bold', 'Halo', true);
 end
+
+%% Extract and Plot Cluster for Grain 42
+% Find the component ID of grain 42
+clusterId = componentId(42);
+
+% Extract all grains in this cluster
+clusterGrains = grains(componentId == clusterId);
+
+% Identify the representative parent grain (for orientation reference)
+isRepParent = ismember(clusterGrains.id, parentStats(:,1));
+if ~any(isRepParent)
+    % Fallback if no parent identified in stats
+    [~, idx] = max(clusterGrains.area);
+    repParent = clusterGrains(idx);
+else
+    repParent = clusterGrains(isRepParent);
+end
+
+% Identify all parent grains (including those with similar orientation)
+allParents = clusterGrains(ismember(clusterGrains.id, parentIds));
+if isempty(allParents), allParents = repParent; end
+
+% Plot the cluster with identified parent and twins
+figure
+plot(allParents, 'faceColor', [0.7 0.7 0.7])
+hold on
+
+% Plot twins with variant colors
+colors = lines(length(tS_sym));
+for i = 1:length(clusterGrains)
+    g = clusterGrains(i);
+    if ismember(g.id, allParents.id), continue; end
+    
+    % Determine the twin variant
+    mori = inv(repParent.meanOrientation) * g.meanOrientation;
+    [~, vIdx] = min(angle_outer(mori, tS_sym.parentTwinMisorientation,'noSym2'));
+    hold on
+    plot(g, 'faceColor', colors(vIdx,:))
+    text(g, sprintf('T_{%d}', vIdx), 'HorizontalAlignment', 'center', 'FontSize', 8)
+end
+
+% plot(grains(42).boundary, 'lineWidth', 3, 'lineColor', 'r')
+title(['Cluster #' num2str(clusterId) ' containing Grain 42'])
+
+%% Calculate Net Deformation
+
+% Initialize net displacement gradient tensor
+netH = tensor(zeros(3,3)); 
+totalArea = sum(clusterGrains.area);
+
+% Sum up deformation from all twins
+for i = 1:length(clusterGrains)
+    g = clusterGrains(i);
+    
+    % Skip parent grains (no deformation relative to itself)
+    if ismember(g.id, allParents.id), continue; end
+    
+    % Determine the twin variant
+    mori = inv(repParent.meanOrientation) * g.meanOrientation;
+    [~, vIdx] = min(angle_outer(mori, tS_sym.parentTwinMisorientation,'noSym2'));
+    
+    % Calculate displacement gradient for this variant in specimen coordinates
+    grained_twin = repParent * tS_sym(vIdx);
+    H = grained_twin.displacementGradient;
+    
+    % Add weighted contribution
+    netH = netH + H * (g.area / totalArea);
+end
+
+disp('Net Displacement Gradient Tensor (Specimen Frame):');
+disp(netH)
+
+% Visualize the net deformation as a vector field
+bnd = clusterGrains.boundary;
+x_bnd = bnd.x; y_bnd = bnd.y;
+
+% Create a grid over the cluster
+xmin = min(x_bnd); xmax = max(x_bnd);
+ymin = min(y_bnd); ymax = max(y_bnd);
+step = min(xmax-xmin, ymax-ymin) / 15;
+[xGrid, yGrid] = meshgrid(xmin:step:xmax, ymin:step:ymax);
+
+% Filter points inside the cluster
+k = boundary(x_bnd, y_bnd, 0.5);
+in = inpolygon(xGrid, yGrid, x_bnd(k), y_bnd(k));
+x = xGrid(in);
+y = yGrid(in);
+
+% Calculate displacement vectors relative to centroid
+centroid = repParent.centroid;
+r = [x - centroid.x, y - centroid.y, zeros(size(x))]'; % 3xN
+dispVec = double(netH) * r; % 3xN
+
+% Plot vector field
+hold on
+quiver(x, y, dispVec(1,:)', dispVec(2,:)', 'Color', 'k', 'LineWidth', 1.5)
+% text(repParent, 'Net Deformation Field', 'Color', 'w', 'VerticalAlignment', 'top', 'HorizontalAlignment', 'center');
