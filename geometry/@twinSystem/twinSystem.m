@@ -607,6 +607,143 @@ classdef twinSystem
                 disp("Provide a cubic CS for this method")
             end
         end
+
+        function twins = calculateTheoreticalTwins(cs, maxIndex, structName)
+            % CALCULATETHEORETICALTWINS Generates possible Type I twin systems
+            % up to a given maximum Miller index.
+            %
+            % Syntax
+            %   twins = twinSystem.calculateTheoreticalTwins(cs, maxIndex)
+            %   twins = twinSystem.calculateTheoreticalTwins(cs, maxIndex, 'FCC')
+            
+            if nargin < 3
+                structName = 'none';
+            end
+            
+            [~, G_rec] = twinSystem.getMetricTensors(cs);
+            
+            % Generate grid of indices
+            [H, K, L] = ndgrid(-maxIndex:maxIndex, -maxIndex:maxIndex, -maxIndex:maxIndex);
+            hkls = [H(:), K(:), L(:)];
+            
+            % Remove the [0 0 0] origin
+            hkls(all(hkls == 0, 2), :) = []; 
+            
+            twins = [];
+            
+            for i = 1:size(hkls, 1)
+                h = hkls(i, 1); k = hkls(i, 2); l = hkls(i, 3);
+                g = gcd(gcd(h, k), l);
+                
+                % Enforce primitive plane checks 
+                if g > 2; continue; end
+                
+                plane = Miller(h, k, l, cs, 'hkl');
+                
+                % Apply selection rules
+                if strcmpi(structName, 'FCC') && g == 1 && ~twinSystem.is_FCC_Rec(plane)
+                    continue;
+                elseif strcmpi(structName, 'BCC') && g == 1 && ~twinSystem.is_BCC_Rec(plane)
+                    continue;
+                elseif strcmpi(structName, 'none') && g > 1
+                    continue;
+                end
+                
+                % Normal to plane in direct space
+                ap = [h; k; l];
+                apD = G_rec * ap; 
+                dhkl2 = 1 / (ap' * apD);
+                OH1_vec = dhkl2 * apD;
+                
+                % Solve the Diophantine equation to build valid basis vectors
+                if g == 1
+                    [OZ1, U, V] = twinSystem.Bezout3D(plane);
+                    [~, U, V] = twinSystem.findUV(0.5*U, 0.5*V, structName);
+                elseif g == 2
+                    plane_half = Miller(h/2, k/2, l/2, cs, 'hkl');
+                    [OZ1, U, V] = twinSystem.Bezout3D(plane_half);
+                    [oz2, U, V] = twinSystem.findUV(0.5*U, 0.5*V, structName);
+                    OZ1 = Miller(0.5 * OZ1.u, 0.5 * OZ1.v, 0.5 * OZ1.w, cs, 'uvw');
+                    
+                    if strcmpi(structName, 'FCC') && ~twinSystem.is_FCC_Dir(OZ1)
+                        OZ1 = OZ1 + oz2;
+                    elseif strcmpi(structName, 'BCC') && ~twinSystem.is_BCC_Dir(OZ1)
+                        OZ1 = OZ1 + oz2;
+                    end
+                end
+                
+                BasisUV = [U.uvw', V.uvw'];
+                
+                % Iterate through rational shear offsets
+                for q = 1:maxIndex
+                    OH = q * OH1_vec;
+                    OZ = q * OZ1.uvw';
+                    
+                    % Projection onto the UV plane
+                    ZH = -OZ + OH;
+                    ZH_inUV = BasisUV \ ZH;
+                    
+                    % Smallest lattice vector adjustment
+                    nU = round(ZH_inUV(1));
+                    nV = round(ZH_inUV(2));
+                    ZA = nU * U.uvw' + nV * V.uvw';
+                    
+                    % Target offset points
+                    OA = OZ + ZA;           % Closest point A
+                    AH = -ZA + ZH;
+                    ZI = ZA + 2 * AH;
+                    OI = OZ + ZI;           % Symmetric point I
+                    
+                    % Validate elements and extract viable twin systems
+                    candidates = {OA, OI};
+                    for c = 1:2
+                        eta2_vec = candidates{c};
+                        if norm(eta2_vec) < 1e-6
+                            continue;
+                        end
+                        
+                        eta2 = Miller(eta2_vec(1), eta2_vec(2), eta2_vec(3), cs, 'uvw');
+                        
+                        % Build distortion matrix explicitly in lattice space
+                        if c == 1
+                            BpOP = [U.uvw', V.uvw', OI];
+                            BpOPd = [U.uvw', V.uvw', OA];
+                        else
+                            BpOP = [U.uvw', V.uvw', OA];
+                            BpOPd = [U.uvw', V.uvw', OI];
+                        end
+                        
+                        if abs(det(BpOP)) < 1e-6
+                            continue;
+                        end
+                        
+                        F = BpOPd / BpOP;
+                        shearAmp = twinSystem.ShearMyFormula(F, cs);
+                        
+                        % Filter and commit valid candidates
+                        if shearAmp > 1e-4 && shearAmp < 1.5
+                            try
+                                tS = twinSystem.byK1eta2(plane, eta2, 1);
+                                
+                                twinStruct = struct();
+                                twinStruct.K1 = plane;
+                                twinStruct.K2 = tS.k2;
+                                twinStruct.eta1 = tS.eta1;
+                                twinStruct.eta2 = eta2;
+                                twinStruct.shear = shearAmp;
+                                twinStruct.q = q;
+                                twinStruct.F = F;
+                                
+                                twins = [twins; twinStruct]; %#ok<AGROW>
+                            catch
+                                % Skip if eta2 points directly along the plane nullifying shear
+                                continue;
+                            end
+                        end
+                    end
+                end
+            end
+        end
     end
 
     methods (Static, Access = private)
