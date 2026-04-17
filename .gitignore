@@ -64,6 +64,7 @@ help/mtex/*
 help/tmp/*
 resources/*
 myScripts/
+userScripts/CyrilCayron
 /extern/chebfun
 
 # 7. Personal & Temp Files

@@ -608,7 +608,56 @@ classdef twinSystem
             end
         end
 
-        function twins = calculateTheoreticalTwins(cs, maxIndex, structName)
+        function printTheoreticalTwins(twins)
+            % PRINTTHEORETICALTWINS Prints an array of twin structures as a formatted table.
+            %
+            % theotw = output struct from calculateTheoreticalTwins
+            % Syntax
+            %   twinSystem.printTheoreticalTwins(theotw)
+
+            if isempty(twins)
+                disp('No theoretical twins found.');
+                return;
+            end
+
+            % Define column widths
+            wNo = 5; wK1 = 15; wK2 = 15; wEta1 = 15; wEta2 = 15; wQ = 4; wShear = 10;
+
+            % Print Header
+            fprintf('\n%-*s | %-*s | %-*s | %-*s | %-*s | %-*s | %-*s\n', ...
+                wNo, 'No.', wK1, 'K1 (Plane)', wK2, 'K2 (Plane)', ...
+                wEta1, 'eta1 (Dir)', wEta2, 'eta2 (Dir)', wQ, 'q', wShear, 'Shear');
+
+            % Print Separator
+            totalWidth = wNo + wK1 + wK2 + wEta1 + wEta2 + wQ + wShear + 18;
+            fprintf('%s\n', repmat('-', 1, totalWidth));
+
+            % Print Rows
+            for i = 1:length(twins)
+                % Extract and format Miller indices
+                % char() converts the MTEX object to a string, strtrim removes trailing spaces
+                k1_str   = strtrim(char(round(twins(i).K1)));
+                k2_str   = strtrim(char(round(twins(i).K2)));
+                eta1_str = strtrim(char(round(twins(i).eta1)));
+                eta2_str = strtrim(char(round(twins(i).eta2)));
+
+                % Optionally wrap in standard crystallographic brackets if MTEX char() doesn't
+                if ~startsWith(k1_str, '(') && ~startsWith(k1_str, '{')
+                    k1_str = sprintf('(%s)', k1_str);
+                    k2_str = sprintf('(%s)', k2_str);
+                    eta1_str = sprintf('[%s]', eta1_str);
+                    eta2_str = sprintf('[%s]', eta2_str);
+                end
+
+                % Print formatted row
+                fprintf('%-*d | %-*s | %-*s | %-*s | %-*s | %-*d | %-*.4f\n', ...
+                    wNo, i, wK1, k1_str, wK2, k2_str, ...
+                    wEta1, eta1_str, wEta2, eta2_str, wQ, twins(i).q, wShear, twins(i).shear);
+            end
+            fprintf('\n');
+        end
+        
+        function twins = calculateTheoreticalTwins(cs, maxMillerIndex, maxQ, structName)
             % CALCULATETHEORETICALTWINS Generates possible Type I twin systems
             % up to a given maximum Miller index.
             %
@@ -616,14 +665,15 @@ classdef twinSystem
             %   twins = twinSystem.calculateTheoreticalTwins(cs, maxIndex)
             %   twins = twinSystem.calculateTheoreticalTwins(cs, maxIndex, 'FCC')
             
-            if nargin < 3
+            if nargin < 4
                 structName = 'none';
             end
             
-            [~, G_rec] = twinSystem.getMetricTensors(cs);
+            % [~, G_rec] = twinSystem.getMetricTensors(cs);
+            G_rec = inv(cs.metricTensor);
             
             % Generate grid of indices
-            [H, K, L] = ndgrid(-maxIndex:maxIndex, -maxIndex:maxIndex, -maxIndex:maxIndex);
+            [H, K, L] = ndgrid(-maxMillerIndex:maxMillerIndex, -maxMillerIndex:maxMillerIndex, -maxMillerIndex:maxMillerIndex);
             hkls = [H(:), K(:), L(:)];
             
             % Remove the [0 0 0] origin
@@ -649,12 +699,15 @@ classdef twinSystem
                     continue;
                 end
                 
-                % Normal to plane in direct space
+                % Normal to plane in direct space (Crystal coordinates)
                 ap = [h; k; l];
-                apD = G_rec * ap; 
+                apD = G_rec * ap;
+                % apD should be equivalent to plane.uvw
                 dhkl2 = 1 / (ap' * apD);
+                % OH1_vec perpendicular to plane and length dhkl
                 OH1_vec = dhkl2 * apD;
                 
+
                 % Solve the Diophantine equation to build valid basis vectors
                 if g == 1
                     [OZ1, U, V] = twinSystem.Bezout3D(plane);
@@ -675,7 +728,7 @@ classdef twinSystem
                 BasisUV = [U.uvw', V.uvw'];
                 
                 % Iterate through rational shear offsets
-                for q = 1:maxIndex
+                for q = 1:maxQ
                     OH = q * OH1_vec;
                     OZ = q * OZ1.uvw';
                     
@@ -721,7 +774,7 @@ classdef twinSystem
                         shearAmp = twinSystem.ShearMyFormula(F, cs);
                         
                         % Filter and commit valid candidates
-                        if shearAmp > 1e-4 && shearAmp < 1.5
+                        if shearAmp > 1e-4 && shearAmp < 2
                             try
                                 tS = twinSystem.byK1eta2(plane, eta2, 1);
                                 
@@ -889,10 +942,10 @@ classdef twinSystem
         
         function [G_dir, G_rec] = getMetricTensors(CS)
             % Builds the direct and reciprocal metric tensors dynamically from MTEX axes
-            a = Miller(1, 0, 0, CS, 'uvw').xyz;
-            b = Miller(0, 1, 0, CS, 'uvw').xyz;
-            c = Miller(0, 0, 1, CS, 'uvw').xyz;
-            
+            a = CS.aAxis.xyz';
+            b = CS.bAxis.xyz';
+            c = CS.cAxis.xyz';
+
             % 3x3 matrix where columns are orthonormal spatial basis vectors
             M = [a, b, c]; 
             G_dir = M' * M;
@@ -901,7 +954,9 @@ classdef twinSystem
         
         function res = ShearBevisCrocker(C, CS)
             % C = correspondence matrix
-            [G_dir, G_rec] = twinSystem.getMetricTensors(CS);
+            % [G_dir, G_rec] = twinSystem.getMetricTensors(CS);
+            G_dir = CS.metricTensor;
+            G_rec = inv(G_dir);
             res2 = trace(G_rec * C' * G_dir * C) - 3;
             if res2 >= 0
                 res = sqrt(res2);
@@ -912,19 +967,24 @@ classdef twinSystem
         
         function res = ShearMyFormula(F, CS)
             % F = distortion matrix
-            [G_dir, G_rec] = twinSystem.getMetricTensors(CS);
+            % [G_dir, G_rec] = twinSystem.getMetricTensors(CS);
+            G_dir = CS.metricTensor;
+            G_rec = inv(G_dir);
             I = eye(3);
             res = sqrt(trace(G_dir * (F - I) * G_rec * (F - I)'));
         end
         
         function res = ShearMyFormulaB(F, CS)
-            [G_dir, ~] = twinSystem.getMetricTensors(CS);
+            % [G_dir, ~] = twinSystem.getMetricTensors(CS);
+            G_dir = CS.metricTensor;
             I = eye(3);
             res = sqrt(trace((F - I)' * G_dir * (F - I)));
         end
         
         function res = ShearMyFormulaC(F, CS)
-            [G_dir, G_rec] = twinSystem.getMetricTensors(CS);
+            % [G_dir, G_rec] = twinSystem.getMetricTensors(CS);
+            G_dir = CS.metricTensor;
+            G_rec = inv(G_dir);
             res = sqrt(trace(G_dir * F * G_rec * F') - 3);
         end
         
