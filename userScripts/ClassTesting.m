@@ -2,7 +2,7 @@ clear all
 close
 %%
 
-cs = crystalSymmetry('6/mmm', 'mineral', 'Re');
+% cs = crystalSymmetry('6/mmm', 'mineral', 'Re');
 tS_1121 = twinSystem.hexagonal_1121_0001(cs);
 tS_sym = tS_1121.symmetrise;
 tS_sym(2)

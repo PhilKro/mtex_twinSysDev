@@ -129,7 +129,7 @@ classdef twinSystem
         
         function [shearvector, shearMagnitude] = shear(tS)
             warning('twinSystem:shear:deprecated', 'Shearmagnitude does not handle recursive twin objects yet.')
-            shearvector = 2 * (tS.k1.normalize - dot(tS.eta2.normalize, tS.k1.normalize).^-1 * tS.eta2.normalize);
+            shearvector = 2 * (tS.k1.normalize - dot(tS.eta2.normalize, tS.k1.normalize).^-1 .* tS.eta2.normalize);
             shearvector.dispStyle = 'UVTW';
             shearMagnitude = norm(shearvector);
         end
@@ -230,26 +230,38 @@ classdef twinSystem
                 typeNames(tS.twinType == 1) = "Type I";
                 typeNames(tS.twinType == 2) = "Type II";
 
+                [~,shearMag] = shear(tS);
+
                 if tS.eta1.lattice.isTriHex
+                    
+                    c = tS.CS.cAxis;
+                    delta_c = tS.displacementGradient * c;
+                    val = dot(c, delta_c);
+
+                    
+                    twinMode = strings(length(tS),1);
+                    twinMode(val > 1e-4) = "extension";
+                    twinMode(val < -1e-4) = "compression";
+                    twinMode(val >= -1e-4 & val <= 1e-4) = "";
+
                     reta1 = round(tS.eta1);
                     rk1 = round(tS.k1);
                     d = [reta1.UVTW rk1.hkil];
                     d(abs(d) < 1e-10) = 0;
-                    dataCell = num2cell([d, reshape(tS.CRSS, [], 1), reshape(tS.variantId, [], 1)]);
-                    fullRow = [dataCell, cellstr(typeNames)];
-                    fullRow = fullRow.'; % Transpose for column-major printing
-                    fprintf('eta_1 U   V   T   W | K_1 H   K   I   L   CRSS  Variant   Type \n');
-                    fprintf('%7.0f %3.0f %3.0f %3.0f |  %3.0f %3.0f %3.0f %3.0f %6.2f %8d   %s\n', fullRow{:});
-                    % cprintf([d, reshape(tS.CRSS, [], 1), char({tS.twinType})], '-L', '  ', '-Lc', {'eta_1 U' 'V' 'T' 'W' '| K_1 H' 'K' 'I' 'L' 'CRSS' 'Type'});
+                    
+                    numericData = [d, reshape(tS.CRSS, [], 1), reshape(tS.variantId, [], 1), shearMag];
+                    dataCell = [num2cell(numericData), cellstr(typeNames), cellstr(twinMode)];
+                    
+                    cprintf(dataCell, '-L', '  ', '-Lc', {'eta_1 U' 'V' 'T' 'W' '| K_1 H' 'K' 'I' 'L' 'CRSS' 'Variant' 'Shear' 'Type' 'Mode'});
+
                 else
                     reta1 = round(tS.eta1);
                     rk1 = round(tS.k1);
                     d = [reta1.uvw rk1.hkl];
                     d(abs(d) < 1e-10) = 0; 
-                    numericData = [d, reshape(tS.CRSS, [], 1), reshape(tS.variantId, [], 1)];
+                    numericData = [d, reshape(tS.CRSS, [], 1), reshape(tS.variantId, [], 1), shearMag];
                     dataCell = [num2cell(numericData), cellstr(typeNames)];
-                    cprintf(dataCell, '-L', '  ', '-Lc', {'eta_1 u' 'v' 'w' '| K_1 h' 'k' 'l' 'CRSS' 'Variant' 'Type'});
-                    % cprintf([d, reshape(tS.CRSS, [], 1), char({tS.twinType})], '-L', '  ', '-Lc', {'eta_1 u' 'v' 'w' '| K_1 h' 'k' 'l' 'CRSS' 'Type'});
+                    cprintf(dataCell, '-L', '  ', '-Lc', {'eta_1 u' 'v' 'w' '| K_1 h' 'k' 'l' 'CRSS' 'Variant' 'Shear' 'Type'});
                 end
             else
                 d = round(100 * [tS.eta1.xyz tS.k1.xyz]) ./ 100;
@@ -604,6 +616,419 @@ classdef twinSystem
                 tS = twinSystem.byK2eta1(Miller(-1, -1,2, CS), Miller(-1, -1, 1, CS, 'uvw'), 1);
             else
                 disp("Provide a cubic CS for this method")
+            end
+        end
+    function printTheoreticalTwins(twins)
+            % PRINTTHEORETICALTWINS Prints an array of twin structures as a formatted table.
+            %
+            % theotw = output struct from calculateTheoreticalTwins
+            % Syntax
+            %   twinSystem.printTheoreticalTwins(theotw)
+
+            if isempty(twins)
+                disp('No theoretical twins found.');
+                return;
+            end
+
+            % Define column widths
+            wNo = 5; wK1 = 15; wK2 = 15; wEta1 = 15; wEta2 = 15; wQ = 4; wShear = 10;
+
+            % Print Header
+            fprintf('\n%-*s | %-*s | %-*s | %-*s | %-*s | %-*s | %-*s\n', ...
+                wNo, 'No.', wK1, 'K1 (Plane)', wK2, 'K2 (Plane)', ...
+                wEta1, 'eta1 (Dir)', wEta2, 'eta2 (Dir)', wQ, 'q', wShear, 'Shear');
+
+            % Print Separator
+            totalWidth = wNo + wK1 + wK2 + wEta1 + wEta2 + wQ + wShear + 18;
+            fprintf('%s\n', repmat('-', 1, totalWidth));
+
+            % Print Rows
+            for i = 1:length(twins)
+                % Extract and format Miller indices
+                % char() converts the MTEX object to a string, strtrim removes trailing spaces
+                dispK1 = twins(i).K1; dispK1.dispStyle = 'hkl';
+                dispK2 = twins(i).K2; dispK2.dispStyle = 'hkl';
+                dispEta1 = twins(i).eta1; dispEta1.dispStyle = 'uvw';
+                dispEta2 = twins(i).eta2; dispEta2.dispStyle = 'uvw';
+
+                k1_str   = strtrim(char(round(dispK1,'maxHKL',100),'hkl'));
+                k2_str   = strtrim(char(round(dispK2,'maxHKL',100),'hkl'));
+                eta1_str = strtrim(char(round(dispEta1,'maxHKL',100),'uvw'));
+                eta2_str = strtrim(char(round(dispEta2,'maxHKL',100),'uvw'));
+
+                % Optionally wrap in standard crystallographic brackets if MTEX char() doesn't
+                if ~startsWith(k1_str, '(') && ~startsWith(k1_str, '{')
+                    k1_str = sprintf('(%s)', k1_str);
+                    k2_str = sprintf('(%s)', k2_str);
+                    eta1_str = sprintf('[%s]', eta1_str);
+                    eta2_str = sprintf('[%s]', eta2_str);
+                end
+
+                % Print formatted row
+                fprintf('%-*d | %-*s | %-*s | %-*s | %-*s | %-*d | %-*.4f\n', ...
+                    wNo, i, wK1, k1_str, wK2, k2_str, ...
+                    wEta1, eta1_str, wEta2, eta2_str, wQ, twins(i).q, wShear, twins(i).shear);
+            end
+            fprintf('\n');
+        end
+        
+        function [twin_objects, twin_structs] = calculateTheoreticalTwins(cs, planeOrMaxIndex, maxQ, structName)
+            %CALCULATETHEORETICALTWINS Generates possible Type I twin systems.
+            %
+            % Syntax
+            %   % Calculate for all planes up to a max Miller index
+            %   [twin_objects, twin_structs] = twinSystem.calculateTheoreticalTwins(cs, maxIndex, maxQ, structName)
+            %
+            %   % Calculate for a specific plane
+            %   [twin_objects, twin_structs] = twinSystem.calculateTheoreticalTwins(cs, plane, maxQ, structName)
+
+            if nargin < 4, structName = 'none'; end
+            if nargin < 3, maxQ = 4; end % Default maxQ
+
+            G_rec = inv(cs.metricTensor);
+            twin_objects = twinSystem.empty;
+            twin_structs = struct.empty;
+
+            if isa(planeOrMaxIndex, 'Miller')
+                % --- Single plane input ---
+                plane = planeOrMaxIndex;
+                if plane.CS ~= cs
+                    error('Crystal symmetry of the input plane must match the provided crystal symmetry.');
+                end
+                [twin_objects, twin_structs] = twinSystem.calculateForPlane(plane, cs, maxQ, structName, G_rec);
+
+            elseif isnumeric(planeOrMaxIndex)
+                % --- Max Miller index input ---
+                maxMillerIndex = planeOrMaxIndex;
+                
+                % Generate grid of indices
+                [H, K, L] = ndgrid(-maxMillerIndex:maxMillerIndex, -maxMillerIndex:maxMillerIndex, -maxMillerIndex:maxMillerIndex);
+                hkls = [H(:), K(:), L(:)];
+                
+                % Remove the [0 0 0] origin
+                hkls(all(hkls == 0, 2), :) = []; 
+                
+                for i = 1:size(hkls, 1)
+                    plane = Miller(hkls(i,1), hkls(i,2), hkls(i,3), cs, 'hkl');
+                    
+                    [plane_twin_objects, plane_twin_structs] = twinSystem.calculateForPlane(plane, cs, maxQ, structName, G_rec);
+                    
+                    if ~isempty(plane_twin_objects)
+                        twin_objects = [twin_objects; plane_twin_objects]; %#ok<AGROW>
+                        twin_structs = [twin_structs; plane_twin_structs]; %#ok<AGROW>
+                    end
+                end
+            else
+                error('Second argument must be a Miller object (for a single plane) or a numeric value (for max Miller index).');
+            end
+        end
+    end
+
+    methods (Static, Access = private)
+        
+        %% --- UTILITY MATH FUNCTIONS ---
+        
+        function res = is_int(x)
+            % Check if number(s) is an integer within floating point tolerance
+            res = all(abs(x - round(x)) < 1e-6);
+        end
+        
+        function res = is_sameodd(p)
+            % Check if the coordinates are all odd, or all even
+            d = 0.5;
+            ceven = all(twinSystem.is_int(p * d));
+            codd = all(twinSystem.is_int((p - 1) * d));
+            res = ceven || codd;
+        end
+        
+        %% --- SELECTION RULES ---
+        
+        function res = is_FCC_Dir(dir)
+            uvw = dir.uvw;
+            res = twinSystem.is_int(sum(uvw));
+        end
+        
+        function res = is_BCC_Dir(dir)
+            uvw = dir.uvw;
+            res = twinSystem.is_sameodd(2 * uvw);
+        end
+        
+        function res = is_FCC_Rec(plane)
+            hkl = plane.hkl;
+            res = twinSystem.is_sameodd(hkl);
+        end
+        
+        function res = is_BCC_Rec(plane)
+            hkl = plane.hkl;
+            res = twinSystem.is_int(sum(hkl) * 0.5);
+        end
+        
+        %% --- DIOPHANTINE SOLVER ---
+        
+        function [OZ1, U, V] = Bezout3D(plane)
+            % BEZOUT3D Finds a specific solution to the Diophantine equation
+            % for a plane (hkl) and provides basis vectors U and V for the null space.
+            hkl = round(plane.hkl);
+            h = hkl(1); k = hkl(2); l = hkl(3);
+            CS = plane.CS;
+            
+            % Extended Euclidean Algorithm
+            [g, a, b] = gcd(h, k);
+            [G, c, d] = gcd(g, l);
+            
+            % OZ1 is a solution such that h*u + k*v + l*w = G (ideally 1 for primitive planes)
+            u = c * a;
+            v = c * b;
+            w = d;
+            OZ1 = Miller(u, v, w, CS, 'uvw');
+            
+            % U and V form a basis for the plane (U.hkl = 0, V.hkl = 0)
+            if g ~= 0
+                U = Miller(k/g, -h/g, 0, CS, 'uvw');
+                V = Miller(a*l/G, b*l/G, -g/G, CS, 'uvw');
+            else
+                % If h=0 and k=0, then the plane is (0,0,l)
+                U = Miller(1, 0, 0, CS, 'uvw');
+                V = Miller(0, 1, 0, CS, 'uvw');
+            end
+        end
+        
+        %% --- BASIS VECTOR MINIMIZATION ---
+        
+        function [oz2, Ures, Vres] = findUV(U, V, structName)
+            % Finds the smallest integer/half-integer directions belonging to the U,V plane
+            CS = U.CS;
+            oz2 = Miller(0, 0, 0, CS, 'uvw');
+            
+            if strcmpi(structName, 'FCC')
+                u_fcc = twinSystem.is_FCC_Dir(U);
+                v_fcc = twinSystem.is_FCC_Dir(V);
+                if u_fcc && v_fcc
+                    Ures = U; Vres = V;
+                elseif u_fcc && ~v_fcc
+                    Ures = U; Vres = 2 * V; oz2 = V;
+                elseif v_fcc && ~u_fcc
+                    Ures = 2 * U; Vres = V; oz2 = U;
+                else
+                    Ures = U - V; Vres = U + V; oz2 = U;
+                end
+            elseif strcmpi(structName, 'BCC')
+                u_bcc = twinSystem.is_BCC_Dir(U);
+                v_bcc = twinSystem.is_BCC_Dir(V);
+                if u_bcc && v_bcc
+                    Ures = U; Vres = V;
+                elseif u_bcc && ~v_bcc
+                    Ures = U; Vres = 2 * V; oz2 = V;
+                elseif v_bcc && ~u_bcc
+                    Ures = 2 * U; Vres = V; oz2 = U;
+                else
+                    Ures = U - V; Vres = U + V; oz2 = U;
+                end
+            else
+                Ures = U; Vres = V;
+            end
+        end
+        
+        function [oz2, Hres, Kres] = findHK(H, K, structName)
+            % Finds the smallest integer/half-integer planes belonging to the H,K zone
+            CS = H.CS;
+            oz2 = Miller(0, 0, 0, CS, 'hkl');
+            
+            if strcmpi(structName, 'FCC')
+                h_fcc = twinSystem.is_FCC_Rec(H);
+                k_fcc = twinSystem.is_FCC_Rec(K);
+                if h_fcc && k_fcc
+                    Hres = H; Kres = K;
+                elseif h_fcc && ~k_fcc
+                    Hres = H; Kres = 2 * K; oz2 = K;
+                elseif k_fcc && ~h_fcc
+                    Hres = 2 * H; Kres = K; oz2 = H;
+                else
+                    Hres = H - K; Kres = H + K; oz2 = H;
+                end
+            elseif strcmpi(structName, 'BCC')
+                h_bcc = twinSystem.is_BCC_Rec(H);
+                k_bcc = twinSystem.is_BCC_Rec(K);
+                if h_bcc && k_bcc
+                    Hres = H; Kres = K;
+                elseif h_bcc && ~k_bcc
+                    Hres = H; Kres = 2 * K; oz2 = K;
+                elseif k_bcc && ~h_bcc
+                    Hres = 2 * H; Kres = K; oz2 = H;
+                else
+                    Hres = H - K; Kres = H + K; oz2 = H;
+                end
+            else
+                Hres = H; Kres = K;
+            end
+        end
+        
+        %% --- SHEAR HELPER METRICS ---
+        
+        function [G_dir, G_rec] = getMetricTensors(CS)
+            % Builds the direct and reciprocal metric tensors dynamically from MTEX axes
+            a = CS.aAxis.xyz';
+            b = CS.bAxis.xyz';
+            c = CS.cAxis.xyz';
+
+            % 3x3 matrix where columns are orthonormal spatial basis vectors
+            M = [a, b, c]; 
+            G_dir = M' * M;
+            G_rec = inv(G_dir);
+        end
+        
+        function res = ShearBevisCrocker(C, CS)
+            % C = correspondence matrix
+            % [G_dir, G_rec] = twinSystem.getMetricTensors(CS);
+            G_dir = CS.metricTensor;
+            G_rec = inv(G_dir);
+            res2 = trace(G_rec * C' * G_dir * C) - 3;
+            if res2 >= 0
+                res = sqrt(res2);
+            else
+                res = 0;
+            end
+        end
+        
+        function res = ShearMyFormula(F, CS)
+            % F = distortion matrix
+            % [G_dir, G_rec] = twinSystem.getMetricTensors(CS);
+            G_dir = CS.metricTensor;
+            G_rec = inv(G_dir);
+            I = eye(3);
+            res = sqrt(trace(G_dir * (F - I) * G_rec * (F - I)'));
+        end
+        
+        function res = ShearMyFormulaB(F, CS)
+            % [G_dir, ~] = twinSystem.getMetricTensors(CS);
+            G_dir = CS.metricTensor;
+            I = eye(3);
+            res = sqrt(trace((F - I)' * G_dir * (F - I)));
+        end
+        
+        function res = ShearMyFormulaC(F, CS)
+            % [G_dir, G_rec] = twinSystem.getMetricTensors(CS);
+            G_dir = CS.metricTensor;
+            G_rec = inv(G_dir);
+            res = sqrt(trace(G_dir * F * G_rec * F') - 3);
+        end
+
+        function [plane_twin_objects, plane_twin_structs] = calculateForPlane(plane, cs, maxQ, structName, G_rec)
+            
+            plane_twin_objects = twinSystem.empty; % Initialize empty twinSystem array
+            plane_twin_structs = struct.empty;     % Initialize empty struct array
+            
+            vals = [plane.h, plane.k, plane.l];
+
+            % Correct for floating point issues but throw error if any value is more than 1e-10 away from an integer
+            if any(mod(vals, 1) > 1e-10 & mod(vals, 1) < (1 - 1e-10))
+                error('Inputs must be integers (floating point noise excepted).');
+            end
+
+            h = round(plane.h); k = round(plane.k); l = round(plane.l);
+            g = gcd(gcd(h, k), l);
+            
+            % Enforce primitive plane checks 
+            if g > 2; return; end
+            
+            % Apply selection rules
+            if strcmpi(structName, 'FCC') && g == 1 && ~twinSystem.is_FCC_Rec(plane)
+                return;
+            elseif strcmpi(structName, 'BCC') && g == 1 && ~twinSystem.is_BCC_Rec(plane)
+                return;
+            elseif strcmpi(structName, 'none') && g > 1
+                return;
+            end
+            
+            % Normal to plane in direct space (Crystal coordinates)
+            ap = [h; k; l];
+            apD = G_rec * ap;
+            % apD should be equivalent to plane.uvw
+            dhkl2 = 1 / (ap' * apD);
+            % OH1_vec perpendicular to plane and length dhkl
+            OH1_vec = dhkl2 * apD;
+            
+            % Solve the Diophantine equation to build valid basis vectors
+            if g == 1
+                [OZ1, U, V] = twinSystem.Bezout3D(plane);
+                [~, U, V] = twinSystem.findUV(0.5*U, 0.5*V, structName);
+            elseif g == 2
+                plane_half = Miller(h/2, k/2, l/2, cs, 'hkl');
+                [OZ1, U, V] = twinSystem.Bezout3D(plane_half);
+                [oz2, U, V] = twinSystem.findUV(0.5*U, 0.5*V, structName);
+                OZ1 = Miller(0.5 * OZ1.u, 0.5 * OZ1.v, 0.5 * OZ1.w, cs, 'uvw');
+                
+                if strcmpi(structName, 'FCC') && ~twinSystem.is_FCC_Dir(OZ1)
+                    OZ1 = OZ1 + oz2;
+                elseif strcmpi(structName, 'BCC') && ~twinSystem.is_BCC_Dir(OZ1)
+                    OZ1 = OZ1 + oz2;
+                end
+            else % g == 0, which is the (000) plane, already filtered out, but for safety
+                return;
+            end
+            
+            BasisUV = [U.uvw', V.uvw'];
+            
+            % Iterate through rational shear offsets
+            for q = 1:maxQ
+                OH = q * OH1_vec;
+                OZ = q * OZ1.uvw';
+                
+                % Projection onto the UV plane
+                ZH = -OZ + OH;
+                ZH_inUV = BasisUV \ ZH;
+                
+                % Smallest lattice vector adjustment
+                nU = round(ZH_inUV(1));
+                nV = round(ZH_inUV(2));
+                ZA = nU * U.uvw' + nV * V.uvw';
+                
+                % Target offset points
+                OA = OZ + ZA;           % Closest point A
+                AH = -ZA + ZH;
+                ZI = ZA + 2 * AH;
+                OI = OZ + ZI;           % Symmetric point I
+                
+                % Validate elements and extract viable twin systems
+                candidates = {OA, OI};
+                for c = 1:2
+                    eta2_vec = candidates{c};
+                    if norm(eta2_vec) < 1e-6
+                        continue;
+                    end
+                    
+                    eta2 = Miller(eta2_vec(1), eta2_vec(2), eta2_vec(3), cs, 'uvw');
+                    
+                    % Build distortion matrix explicitly in lattice space
+                    if c == 1
+                        BpOP = [U.uvw', V.uvw', OI];
+                        BpOPd = [U.uvw', V.uvw', OA];
+                    else
+                        BpOP = [U.uvw', V.uvw', OA];
+                        BpOPd = [U.uvw', V.uvw', OI];
+                    end
+                    
+                    if abs(det(BpOP)) < 1e-6
+                        continue;
+                    end
+                    
+                    F = BpOPd / BpOP;
+                    shearAmp = twinSystem.ShearMyFormula(F, cs);
+                    
+                    % Filter and commit valid candidates
+                    if shearAmp > 1e-4 && shearAmp < 2
+                        try
+                            tS = twinSystem.byK1eta2(plane, eta2, 1);
+                            
+                            plane_twin_objects = [plane_twin_objects; tS]; %#ok<AGROW>
+                            twinStruct = struct('K1', plane, 'K2', tS.k2, 'eta1', tS.eta1, 'eta2', eta2, 'shear', shearAmp, 'q', q, 'F', F);
+                            plane_twin_structs = [plane_twin_structs; twinStruct]; %#ok<AGROW>
+                        catch
+                            % Skip if eta2 points directly along the plane nullifying shear
+                            continue;
+                        end
+                    end
+                end
             end
         end
     end

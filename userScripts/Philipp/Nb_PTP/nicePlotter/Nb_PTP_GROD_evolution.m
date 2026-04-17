@@ -32,7 +32,7 @@ thresh_ci = 0.13;
 CS = crystalSymmetry.load('Nb-Niobium.cif');
 
 %% 3. Find and Sort Data Files
-angFiles = dir(fullfile(baseDir, '*.ang'));
+angFiles = dir(fullfile(baseDir, '*263.ang'));
 % Sort files by name to ensure they are processed in temporal order
 [~, sortOrder] = sort({angFiles.name});
 angFiles = angFiles(sortOrder);
@@ -43,6 +43,7 @@ if isempty(angFiles)
 end
 
 fprintf('--- Establishing reference orientations from: %s ---\n', angFiles(1).name);
+[~, baseName_ref, ~] = fileparts(angFiles(1).name);
 % Load the first file to define the reference state
 ebsd_ref = EBSD.load(fullfile(baseDir, angFiles(1).name), CS, 'convertEuler2SpatialReferenceFrame', 'setting 2');
 
@@ -51,8 +52,18 @@ ebsd_ref = rotate(ebsd_ref, rotation.byAxisAngle(xvector, -70*degree + tkd_tilt)
 ebsd_ref(ebsd_ref.ci < thresh_ci) = 'notIndexed';
 ebsd_ref = rotate(ebsd_ref, rotation.byAxisAngle(zvector, 180*degree), 'keepXY');
 
+% Apply specimen mask if it exists
+mask_file_ref = fullfile(baseDir, sprintf('%s_specimen_mask.mat', baseName_ref));
+if exist(mask_file_ref, 'file')
+    fprintf('Applying specimen mask to reference data...\n');
+    load(mask_file_ref, 'specimenlocation');
+    ebsd_ref(~specimenlocation) = 'notIndexed';
+else
+    warning('No specimen mask found for %s. Proceeding with unmasked data.', baseName_ref);
+end
+
 % Calculate reference grains with a stricter threshold for stability
-[grains_ref, ~] = calcGrains(ebsd_ref('indexed'), 'minPixel', minSize, 'angle', grainThresh_ref);
+[grains_ref, ~] = calcGrains(ebsd_ref, 'minPixel', minSize, 'angle', grainThresh_ref);
 ref_orientations = grains_ref.meanOrientation;
 fprintf('Found %d reference grains to track.\n\n', length(grains_ref));
 
@@ -70,14 +81,27 @@ for i = 1:length(angFiles)
     ebsd_inc(ebsd_inc.ci < thresh_ci) = 'notIndexed';
     ebsd_inc = rotate(ebsd_inc, rotation.byAxisAngle(zvector, 180*degree), 'keepXY');
     
+    % Apply specimen mask if it exists
+    mask_file_inc = fullfile(baseDir, sprintf('%s_specimen_mask.mat', baseName));
+    if exist(mask_file_inc, 'file')
+        fprintf('  -> Applying specimen mask...\n');
+        load(mask_file_inc, 'specimenlocation');
+        ebsd_inc(~specimenlocation) = 'notIndexed';
+    else
+        warning('  -> No specimen mask found for %s. Proceeding with unmasked data.', baseName);
+    end
+
     % Calculate grains for the current increment using the liberal threshold
-    [grains_inc, ebsd_inc.grainId] = calcGrains(ebsd_inc('indexed'), 'minPixel', minSize, 'angle', grainThresh_inc);
+    [grains_inc, ebsd_inc.grainId] = calcGrains(ebsd_inc, 'minPixel', minSize, 'angle', grainThresh_inc);
     
     % --- Map current grains to the fixed reference orientations ---
     % Create a list of reference orientations indexed by the current grainId
     oriRefList = orientation.nan(max(grains_inc.id), 1, CS);
     for k = 1:length(grains_inc)
         g_inc = grains_inc(k);
+        if g_inc.phase == -1
+            continue
+        end
         % Find the best matching reference orientation by minimum misorientation angle
         [~, best_match_idx] = min(angle(g_inc.meanOrientation, ref_orientations));
         oriRefList(g_inc.id) = ref_orientations(best_match_idx);

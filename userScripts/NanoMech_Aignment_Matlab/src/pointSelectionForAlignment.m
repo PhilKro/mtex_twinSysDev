@@ -181,8 +181,12 @@ yDef = dataDef.Y(:,1)';
 
 % check if a "selection of points" variable exists; in that case, load the
 % file containing that data.
-if ischar(options.sel_points_fname)
+if ischar(options.sel_points_fname) || isstring(options.sel_points_fname)
     loaddata = load(options.sel_points_fname);
+    warning('pointSelectionForAlignment:UnnestingNestedDataStruct', 'The loaded data from options.sel_points_fname is expected to be a struct with a field "alignment_data_EBSD". ')
+    if isfield(loaddata, 'alignment_data_EBSD')
+        loaddata = loaddata.alignment_data_EBSD;
+    end
     % reference and deformed config selection point coordinates
     fsel = loaddata.fsel;
     gsel = loaddata.gsel;

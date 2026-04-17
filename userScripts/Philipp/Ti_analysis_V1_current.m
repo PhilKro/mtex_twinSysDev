@@ -117,9 +117,12 @@ ebsd0=ebsd0.gridify;
 % %CS = crystalSymmetry.load("Rhenium.cif");
 % 
 % %Mg
-% %CS = crystalSymmetry('6/mmm',[1.570796370506287 1.570796370506287 2.094395102393195],'x||a','mineral','Magnesium');
+% %CS = crystalSymmetry('6/mmm',[3.21 3.21 5.21],'x||a','mineral','Magnesium');
 % %CS = crystalSymmetry.load("Mg-Magnesium.cif");
 % 
+% %Cd
+% CS = crystalSymmetry('6/mmm',[2.9789, 2.9789, 5.6166],'x||a','mineral','Cd')
+%
 % %if using a predifined CS
 % %ebsd = loadEBSD_h5oina(fname,CS,'convertEuler2SpatialReferenceFrame');
 % 
