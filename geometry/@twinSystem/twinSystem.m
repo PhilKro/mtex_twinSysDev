@@ -111,7 +111,7 @@ classdef twinSystem
                 % Type I twin is defined by a reflection in the K1 plane.
                 % For centrosymmetric crystals, this is equivalent to a 180-degree rotation about the normal to K1.
                 warning('twinSystem:parentTwinMisorientation:type1Assumption', ...
-                    'The current implementation works with an improper rotation here. For orientation analysis this might not work (especially if you work with a non-centrosymmteric point group). Maybe the proper rotation should be implemented here aswell/instead?');
+                    'The current implementation works with an improper rotation here. For orientation analysis this might not work (especially if you work with a centrosymmteric point group). Maybe the proper rotation should be implemented here aswell/instead?');
                 misori(isType1OrCompound) = -orientation.byAxisAngle(tS.k1(isType1OrCompound), pi);
             end
             % Type II (2)
@@ -129,7 +129,7 @@ classdef twinSystem
         
         function [shearvector, shearMagnitude] = shear(tS)
             warning('twinSystem:shear:deprecated', 'Shearmagnitude does not handle recursive twin objects yet.')
-            shearvector = 2 * (tS.k1.normalize - dot(tS.eta2.normalize, tS.k1.normalize).^-1 * tS.eta2.normalize);
+            shearvector = 2 * (tS.k1.normalize - dot(tS.eta2.normalize, tS.k1.normalize).^-1 .* tS.eta2.normalize);
             shearvector.dispStyle = 'UVTW';
             shearMagnitude = norm(shearvector);
         end
@@ -202,8 +202,7 @@ classdef twinSystem
             if isscalar(tS)
                 switch tS.twinType
                     case 0
-                        % typeName = "Compound";
-                        typeName = "Type I+II";
+                        typeName = "Compound";
                     case 1
                         typeName = "Type I";
                     case 2
@@ -227,30 +226,42 @@ classdef twinSystem
         function dispData(tS)
             if isa(tS.CS, 'crystalSymmetry')
                 typeNames = strings(length(tS.eta1),1);
-                typeNames(tS.twinType == 0) = "Type I+II"; % "Compound";
+                typeNames(tS.twinType == 0) = "Compound";
                 typeNames(tS.twinType == 1) = "Type I";
                 typeNames(tS.twinType == 2) = "Type II";
 
+                [~,shearMag] = shear(tS);
+
                 if tS.eta1.lattice.isTriHex
+                    
+                    c = tS.CS.cAxis;
+                    delta_c = tS.displacementGradient * c;
+                    val = dot(c, delta_c);
+
+                    
+                    twinMode = strings(length(tS),1);
+                    twinMode(val > 1e-4) = "extension";
+                    twinMode(val < -1e-4) = "compression";
+                    twinMode(val >= -1e-4 & val <= 1e-4) = "";
+
                     reta1 = round(tS.eta1);
                     rk1 = round(tS.k1);
                     d = [reta1.UVTW rk1.hkil];
                     d(abs(d) < 1e-10) = 0;
-                    dataCell = num2cell([d, reshape(tS.CRSS, [], 1), reshape(tS.variantId, [], 1)]);
-                    fullRow = [dataCell, cellstr(typeNames)];
-                    fullRow = fullRow.'; % Transpose for column-major printing
-                    fprintf('eta_1 U   V   T   W | K_1 H   K   I   L   CRSS  Variant   Type \n');
-                    fprintf('%7.0f %3.0f %3.0f %3.0f |  %3.0f %3.0f %3.0f %3.0f %6.2f %8d   %s\n', fullRow{:});
-                    % cprintf([d, reshape(tS.CRSS, [], 1), char({tS.twinType})], '-L', '  ', '-Lc', {'eta_1 U' 'V' 'T' 'W' '| K_1 H' 'K' 'I' 'L' 'CRSS' 'Type'});
+                    
+                    numericData = [d, reshape(tS.CRSS, [], 1), reshape(tS.variantId, [], 1), shearMag];
+                    dataCell = [num2cell(numericData), cellstr(typeNames), cellstr(twinMode)];
+                    
+                    cprintf(dataCell, '-L', '  ', '-Lc', {'eta_1 U' 'V' 'T' 'W' '| K_1 H' 'K' 'I' 'L' 'CRSS' 'Variant' 'Shear' 'Type' 'Mode'});
+
                 else
                     reta1 = round(tS.eta1);
                     rk1 = round(tS.k1);
                     d = [reta1.uvw rk1.hkl];
                     d(abs(d) < 1e-10) = 0; 
-                    numericData = [d, reshape(tS.CRSS, [], 1), reshape(tS.variantId, [], 1)];
+                    numericData = [d, reshape(tS.CRSS, [], 1), reshape(tS.variantId, [], 1), shearMag];
                     dataCell = [num2cell(numericData), cellstr(typeNames)];
-                    cprintf(dataCell, '-L', '  ', '-Lc', {'eta_1 u' 'v' 'w' '| K_1 h' 'k' 'l' 'CRSS' 'Variant' 'Type'});
-                    % cprintf([d, reshape(tS.CRSS, [], 1), char({tS.twinType})], '-L', '  ', '-Lc', {'eta_1 u' 'v' 'w' '| K_1 h' 'k' 'l' 'CRSS' 'Type'});
+                    cprintf(dataCell, '-L', '  ', '-Lc', {'eta_1 u' 'v' 'w' '| K_1 h' 'k' 'l' 'CRSS' 'Variant' 'Shear' 'Type'});
                 end
             else
                 d = round(100 * [tS.eta1.xyz tS.k1.xyz]) ./ 100;
@@ -448,7 +459,7 @@ classdef twinSystem
             if tS1.CS ~= tS2.CS, l = false; return; end
             
             %% CHECK IF CORRECT
-            warning('twinSystem:eq:correctness','TODO: The implementation of twinSystem/eq is incorrect/incomplete. No differentiation of variants.')
+            warning('twinSystem:eq:correctness','TODO: check if the implementation of twinSystem/eq is correct.')
             ops = tS1.CS.quaternion;
             l = any( (ops * tS1.k1) == tS2.k1 & (ops * tS1.eta1) == tS2.eta1 );
         end
@@ -607,8 +618,7 @@ classdef twinSystem
                 disp("Provide a cubic CS for this method")
             end
         end
-
-     function printTheoreticalTwins(twins)
+    function printTheoreticalTwins(twins)
             % PRINTTHEORETICALTWINS Prints an array of twin structures as a formatted table.
             %
             % theotw = output struct from calculateTheoreticalTwins
@@ -663,7 +673,9 @@ classdef twinSystem
         end
         
         function [twin_objects, twin_structs] = calculateTheoreticalTwins(cs, planeOrMaxIndex, maxQ, structName)
-            %CALCULATETHEORETICALTWINS Generates possible Type I twin systems.
+            %CALCULATETHEORETICALTWINS Generates possible twin systems
+            %(normal mode) for a given crystalSymmetry, plane or max hkl
+            %and twin index (q). 'FCC' or 'BCC' can be handed over as char.
             %
             % Acknowledgement:
             %   The logic and algorithms in this method are translated and adapted 
@@ -689,7 +701,7 @@ classdef twinSystem
                 if plane.CS ~= cs
                     error('Crystal symmetry of the input plane must match the provided crystal symmetry.');
                 end
-                [twin_objects, twin_structs] = twinSystem.calculateForPlane(plane, cs, maxQ, structName, G_rec);
+                [twin_objects, twin_structs] = twinSystem.calculateForPlane(plane, maxQ, structName);
 
             elseif isnumeric(planeOrMaxIndex)
                 % --- Max Miller index input ---
@@ -705,7 +717,7 @@ classdef twinSystem
                 for i = 1:size(hkls, 1)
                     plane = Miller(hkls(i,1), hkls(i,2), hkls(i,3), cs, 'hkl');
                     
-                    [plane_twin_objects, plane_twin_structs] = twinSystem.calculateForPlane(plane, cs, maxQ, structName, G_rec);
+                    [plane_twin_objects, plane_twin_structs] = twinSystem.calculateForPlane(plane, maxQ, structName);
                     
                     if ~isempty(plane_twin_objects)
                         twin_objects = [twin_objects; plane_twin_objects]; %#ok<AGROW>
@@ -760,8 +772,21 @@ classdef twinSystem
         %% --- DIOPHANTINE SOLVER ---
         
         function [OZ1, U, V] = Bezout3D(plane)
-            % BEZOUT3D Finds a specific solution to the Diophantine equation
-            % for a plane (hkl) and provides basis vectors U and V for the null space.
+            % BEZOUT3D Solves the 3D linear Diophantine equation for a crystallographic plane.
+            %
+            % Syntax
+            %   [OZ1, U, V] = twinSystem.Bezout3D(plane)
+            %
+            % Description
+            %   Applies the Extended Euclidean Algorithm to a plane's Miller indices (hkl) 
+            %   to calculate three physical, integer-based direct lattice vectors.
+            %
+            % Outputs
+            %   OZ1 - Direct lattice vector connecting the origin to an atom on the 
+            %         first adjacent (hkl) plane.
+            %   U   - First primitive lattice vector lying exactly within the (hkl) plane.
+            %   V   - Second primitive lattice vector lying exactly within the (hkl) plane, 
+            %         linearly independent from U.
             hkl = round(plane.hkl);
             h = hkl(1); k = hkl(2); l = hkl(3);
             CS = plane.CS;
@@ -771,9 +796,14 @@ classdef twinSystem
             [G, c, d] = gcd(g, l);
             
             % OZ1 is a solution such that h*u + k*v + l*w = G (ideally 1 for primitive planes)
+            % the euclidian extension simplifies to (c*a)*h + (c*b)*k + d*l = G
+            % these values are calced by gcd and assigned to uvw
             u = c * a;
             v = c * b;
             w = d;
+
+            % OZ1 is a lattice vector pointing to an atom on an adjacent
+            % hkl plane
             OZ1 = Miller(u, v, w, CS, 'uvw');
             
             % U and V form a basis for the plane (U.hkl = 0, V.hkl = 0)
@@ -907,18 +937,37 @@ classdef twinSystem
             res = sqrt(trace(G_dir * F * G_rec * F') - 3);
         end
 
-        function [plane_twin_objects, plane_twin_structs] = calculateForPlane(plane, cs, maxQ, structName, G_rec)
-            %CALCULATEFORPLANE Helper method to calculate theoretical twins for a specific plane.
+        function [plane_twin_objects, plane_twin_structs] = calculateForPlane(plane, maxQ, structName)
+            % CALCULATEFORPLANE Determines the lowest shear normal twinning modes for a given plane up to a maximum twin index (maxQ).
             %
             % Acknowledgement:
             %   The logic and algorithms in this method are translated and adapted 
             %   from the ARPGE, GenOVa, and Crystals programs developed by Cyril Cayron.
-            
+            % Syntax
+            %   [plane_twin_objects, plane_twin_structs] = twinSystem.calculateForPlane(plane, maxQ, structName)
+            %
+            % Description
+            %   Evaluates a candidate twin plane (K1) to find viable conjugate shear directions 
+            %   (eta2) up to a maximum twin index (q). By using the physical 
+            %   lattice node closest to the geometric normal on the q-th layer, this function 
+            %   isolates "normal modes" as defined by C. Cayron. https://www.mdpi.com/2075-4701/10/2/231
+            %
+            % Inputs
+            %   plane      - Miller object representing the candidate twin plane (K1).
+            %   maxQ       - Integer defining the maximum twin index (number of lattice planes) to evaluate.
+            %   structName - String defining the lattice type (e.g., 'FCC', 'BCC', 'none') for centering rules.
+            %
+            % Outputs
+            %   plane_twin_objects - Array of initialized twinSystem objects for valid modes.
+            %   plane_twin_structs - Structured array containing the detailed crystallographic 
+            %                        elements (K1, K2, eta1, eta2, shear, q, F).
+
+
             plane_twin_objects = twinSystem.empty; % Initialize empty twinSystem array
             plane_twin_structs = struct.empty;     % Initialize empty struct array
             
             vals = [plane.h, plane.k, plane.l];
-
+            cs = plane.CS;
             % Correct for floating point issues but throw error if any value is more than 1e-10 away from an integer
             if any(mod(vals, 1) > 1e-10 & mod(vals, 1) < (1 - 1e-10))
                 error('Inputs must be integers (floating point noise excepted).');
@@ -941,6 +990,8 @@ classdef twinSystem
             
             % Normal to plane in direct space (Crystal coordinates)
             ap = [h; k; l];
+
+            G_rec = inv(cs.metricTensor);
             apD = G_rec * ap;
             % apD should be equivalent to plane.uvw
             dhkl2 = 1 / (ap' * apD);
@@ -970,62 +1021,78 @@ classdef twinSystem
             
             % Iterate through rational shear offsets
             for q = 1:maxQ
+
+                % Stretch the single-layer theoretical normal (OH1_vec) by the twin index (q).
+                % This point lies exactly vertically above the origin.
                 OH = q * OH1_vec;
+                
+                % We stretch the single-layer physical atomic step (OZ1) by q.
+                % This lands on a real atom on the q-th plane, but because it stepped diagonally, 
+                % it is far away from the perfect normal (OH).
                 OZ = q * OZ1.uvw';
                 
-                % Projection onto the UV plane
+                % ZH points from our reference atom (OZ) to the geometric normal (OH).
+                % Lies flat on the twin plane
                 ZH = -OZ + OH;
+                
+                % This translates the 3D discrepancy (ZH) into our 2D (U, V) plane coordinate system.
+                % How many fractional steps of U and V from reference atom to the geometric normal.
                 ZH_inUV = BasisUV \ ZH;
                 
-                % Smallest lattice vector adjustment
+                % Because atoms only exist at whole numbers, we round the fractional steps.
+                % This finds the physical coordinates of the atom closest to the normal.
                 nU = round(ZH_inUV(1));
                 nV = round(ZH_inUV(2));
+                
+                % ZA is the 3D vector representing the flat physical translation along the twin plane 
+                % from our reference atom (OZ) to the closest real atom.
                 ZA = nU * U.uvw' + nV * V.uvw';
                 
-                % Target offset points
-                OA = OZ + ZA;           % Closest point A
-                AH = -ZA + ZH;
-                ZI = ZA + 2 * AH;
-                OI = OZ + ZI;           % Symmetric point I
+                % Candidate 1
+                % Add the adjustment walk (ZA) to our initial reference atom (OZ).
+                % OA is now the true vector from the origin to the closest physical atom on the q-th plane.
+                % This is candidate 1 for the conjugate shear direction (eta2).
+                OA = OZ + ZA;           
                 
+                % This is the remaining distance between our closest physical atom (OA) 
+                % and the geometric normal (OH).
+                AH = -ZA + ZH;
+                              
+                % OI is the vector from the origin to the sheared atom on the q-th plane.
+                ZI = ZA + 2 * AH;
+                OI = OZ + ZI;
+                                
                 % Validate elements and extract viable twin systems
-                candidates = {OA, OI};
-                for c = 1:2
-                    eta2_vec = candidates{c};
-                    if norm(eta2_vec) < 1e-6
+                eta2_vec = OA;
+                if norm(eta2_vec) < 1e-6
+                    continue;
+                end
+                    
+                eta2 = Miller(eta2_vec(1), eta2_vec(2), eta2_vec(3), cs, 'uvw');
+                    
+                % Build distortion matrix explicitly in lattice space
+               
+                BpOP = [U.uvw', V.uvw', OI];
+                BpOPd = [U.uvw', V.uvw', OA];
+                
+                if abs(det(BpOP)) < 1e-6
+                    continue;
+                end
+                    
+                F = BpOPd / BpOP;
+                shearAmp = twinSystem.ShearMyFormula(F, cs);
+                
+                % Filter and commit valid candidates
+                if shearAmp > 1e-4 && shearAmp < 2
+                    try
+                        tS = twinSystem.byK1eta2(plane, eta2, 1);
+                        
+                        plane_twin_objects = [plane_twin_objects; tS]; %#ok<AGROW>
+                        twinStruct = struct('K1', plane, 'K2', tS.k2, 'eta1', tS.eta1, 'eta2', eta2, 'shear', shearAmp, 'q', q, 'F', F);
+                        plane_twin_structs = [plane_twin_structs; twinStruct]; %#ok<AGROW>
+                    catch
+                        % Skip if eta2 points directly along the plane nullifying shear
                         continue;
-                    end
-                    
-                    eta2 = Miller(eta2_vec(1), eta2_vec(2), eta2_vec(3), cs, 'uvw');
-                    
-                    % Build distortion matrix explicitly in lattice space
-                    if c == 1
-                        BpOP = [U.uvw', V.uvw', OI];
-                        BpOPd = [U.uvw', V.uvw', OA];
-                    else
-                        BpOP = [U.uvw', V.uvw', OA];
-                        BpOPd = [U.uvw', V.uvw', OI];
-                    end
-                    
-                    if abs(det(BpOP)) < 1e-6
-                        continue;
-                    end
-                    
-                    F = BpOPd / BpOP;
-                    shearAmp = twinSystem.ShearMyFormula(F, cs);
-                    
-                    % Filter and commit valid candidates
-                    if shearAmp > 1e-4 && shearAmp < 2
-                        try
-                            tS = twinSystem.byK1eta2(plane, eta2, 1);
-                            
-                            plane_twin_objects = [plane_twin_objects; tS]; %#ok<AGROW>
-                            twinStruct = struct('K1', plane, 'K2', tS.k2, 'eta1', tS.eta1, 'eta2', eta2, 'shear', shearAmp, 'q', q, 'F', F);
-                            plane_twin_structs = [plane_twin_structs; twinStruct]; %#ok<AGROW>
-                        catch
-                            % Skip if eta2 points directly along the plane nullifying shear
-                            continue;
-                        end
                     end
                 end
             end
