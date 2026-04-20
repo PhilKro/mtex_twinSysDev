@@ -672,7 +672,7 @@ classdef twinSystem
             fprintf('\n');
         end
         
-        function [twin_objects, twin_structs] = calculateTheoreticalTwins(cs, planeOrMaxIndex, maxQ, structName)
+        function [twin_objects, twin_structs] = calculateTheoreticalTwins(cs, planeOrMaxIndex, qRange, structName)
             %CALCULATETHEORETICALTWINS Generates possible twin systems
             %(normal mode) for a given crystalSymmetry, plane or max hkl
             %and twin index (q). 'FCC' or 'BCC' can be handed over as char.
@@ -681,15 +681,25 @@ classdef twinSystem
             %   The logic and algorithms in this method are translated and adapted 
             %   from the ARPGE, GenOVa, and Crystals programs developed by Cyril Cayron.
             %
+            % Inputs
+            %   cs                  - crystalSymmetry object defining the lattice symmetry.
+            %   planeOrMaxIndex     - Miller object representing the candidate twin plane (K1) or maximum Miller index.
+            %   qRange              - Double array defining the range of twin indices to evaluate.
+            %   structName          - String defining the lattice type (e.g., 'FCC', 'BCC', 'none') for centering rules.
+            %
+            % Outputs
+            %   twin_objects        - Array of initialized twinSystem objects for valid modes.
+            %   twin_structs        - Structured array containing the detailed crystallographic 
+            %                           elements (K1, K2, eta1, eta2, shear, q, F).
             % Syntax
             %   % Calculate for all planes up to a max Miller index
-            %   [twin_objects, twin_structs] = twinSystem.calculateTheoreticalTwins(cs, maxIndex, maxQ, structName)
+            %   [twin_objects, twin_structs] = twinSystem.calculateTheoreticalTwins(cs, maxIndex, qRange, structName)
             %
             %   % Calculate for a specific plane
-            %   [twin_objects, twin_structs] = twinSystem.calculateTheoreticalTwins(cs, plane, maxQ, structName)
+            %   [twin_objects, twin_structs] = twinSystem.calculateTheoreticalTwins(cs, plane, qRange, structName)
 
-            if nargin < 4, structName = 'none'; end
-            if nargin < 3, maxQ = 4; end % Default maxQ
+            if nargin < 4, structName = 'none'; end % Default structure
+            if nargin < 3, qRange = 1:4; end % Default qRange
 
             G_rec = inv(cs.metricTensor);
             twin_objects = twinSystem.empty;
@@ -701,7 +711,7 @@ classdef twinSystem
                 if plane.CS ~= cs
                     error('Crystal symmetry of the input plane must match the provided crystal symmetry.');
                 end
-                [twin_objects, twin_structs] = twinSystem.calculateForPlane(plane, maxQ, structName);
+                [twin_objects, twin_structs] = twinSystem.calculateForPlane(plane, qRange, structName);
 
             elseif isnumeric(planeOrMaxIndex)
                 % --- Max Miller index input ---
@@ -717,7 +727,7 @@ classdef twinSystem
                 for i = 1:size(hkls, 1)
                     plane = Miller(hkls(i,1), hkls(i,2), hkls(i,3), cs, 'hkl');
                     
-                    [plane_twin_objects, plane_twin_structs] = twinSystem.calculateForPlane(plane, maxQ, structName);
+                    [plane_twin_objects, plane_twin_structs] = twinSystem.calculateForPlane(plane, qRange, structName);
                     
                     if ~isempty(plane_twin_objects)
                         twin_objects = [twin_objects; plane_twin_objects]; %#ok<AGROW>
@@ -937,14 +947,14 @@ classdef twinSystem
             res = sqrt(trace(G_dir * F * G_rec * F') - 3);
         end
 
-        function [plane_twin_objects, plane_twin_structs] = calculateForPlane(plane, maxQ, structName)
-            % CALCULATEFORPLANE Determines the lowest shear normal twinning modes for a given plane up to a maximum twin index (maxQ).
+        function [plane_twin_objects, plane_twin_structs] = calculateForPlane(plane, qRange, structName)
+            % CALCULATEFORPLANE Determines the lowest shear normal twinning modes for a given plane and range of twin indeces (qRange).
             %
             % Acknowledgement:
             %   The logic and algorithms in this method are translated and adapted 
             %   from the ARPGE, GenOVa, and Crystals programs developed by Cyril Cayron.
             % Syntax
-            %   [plane_twin_objects, plane_twin_structs] = twinSystem.calculateForPlane(plane, maxQ, structName)
+            %   [plane_twin_objects, plane_twin_structs] = twinSystem.calculateForPlane(plane, qRange, structName)
             %
             % Description
             %   Evaluates a candidate twin plane (K1) to find viable conjugate shear directions 
@@ -954,7 +964,7 @@ classdef twinSystem
             %
             % Inputs
             %   plane      - Miller object representing the candidate twin plane (K1).
-            %   maxQ       - Integer defining the maximum twin index (number of lattice planes) to evaluate.
+            %   qRange     - Double array defining the range of twin indices to evaluate.
             %   structName - String defining the lattice type (e.g., 'FCC', 'BCC', 'none') for centering rules.
             %
             % Outputs
@@ -1020,15 +1030,15 @@ classdef twinSystem
             BasisUV = [U.uvw', V.uvw'];
             
             % Iterate through rational shear offsets
-            for q = 1:maxQ
+            for q = qRange
 
                 % Stretch the single-layer theoretical normal (OH1_vec) by the twin index (q).
                 % This point lies exactly vertically above the origin.
                 OH = q * OH1_vec;
                 
                 % We stretch the single-layer physical atomic step (OZ1) by q.
-                % This lands on a real atom on the q-th plane, but because it stepped diagonally, 
-                % it is far away from the perfect normal (OH).
+                % This lands on an atom on the q-th plane, but because it stepped diagonally, 
+                % it is not necessarily the closest atom to the perfect normal (OH).
                 OZ = q * OZ1.uvw';
                 
                 % ZH points from our reference atom (OZ) to the geometric normal (OH).
