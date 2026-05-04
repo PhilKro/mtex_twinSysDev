@@ -116,10 +116,11 @@ for i = 1:length(angFiles)
     fig1 = figure('Name', [baseName ' GROD Angle'], 'Visible', 'off');
     plot(ebsd_inc, grod.angle./degree, 'micronbar', 'off');
     hold on; plot(grains_inc.boundary, 'lineWidth', 1.5); hold off;
-    mtexColorMap LaboTeX;
+    % mtexColorMap LaboTeX;
+    mtexColorMap viridis
     mtexColorbar('title', 'GROD Angle (deg)');
     title(sprintf('GROD Angle - %s', baseName), 'Interpreter', 'none');
-    exportScaledFigure(fig1, fullfile(outDir, [baseName, '_GROD_Angle.png']), 'noDateString');
+    exportScaledFigure(fig1, fullfile(outDir, [baseName, '_GROD_Angle_viridis.png']), 'noDateString');
     
     % Plot 2: GROD Axis Map (Crystal Coordinates)
     fig2 = figure('Name', [baseName ' GROD Axis Map'], 'Visible', 'off');
@@ -137,6 +138,20 @@ for i = 1:length(angFiles)
     plot(grod.axis, 'weights', grod.angle, 'contourf', 'fundamentalRegion', 'antipodal', 'halfwidth', 10*degree, 'DisplayName', 'Weighted Density');
     mtexColorbar('title', 'Weighted M.U.D.');
     hold on;
+    
+    % Plot 4: KAM map
+    kam = ebsd_inc.KAM / degree;
+
+    % lets plot it
+    figure;
+    plot(ebsd_inc,kam,'micronbar','off')
+    hold on
+    plot(grains_inc.boundary,'lineWidth',1.5)
+    setColorRange([0,5])
+    mtexColorbar
+    mtexColorMap LaboTeX
+    hold off
+    exportScaledFigure(fig2, fullfile(outDir, [baseName, 'KAM_Map.png']), 'noDateString');
 
     % --- Add scatter points for axes with the highest angles ---
     angle_thresh_80 = prctile(grod.angle, 80);

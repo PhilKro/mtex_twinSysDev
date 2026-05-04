@@ -32,6 +32,19 @@ function [final_mask, p] = interactive_specimen_mask(ci_matrix, init_p)
     end
     
     final_mask = false(size(ci_matrix));
+    left_roi = [];
+    right_roi = [];
+    img_handle = [];
+    bound_handles = [];
+    
+    % Initial image setup
+    axes(ax);
+    img_handle = imagesc(ax, zeros(size(ci_matrix)), [p.disp_min, p.disp_max]);
+    colormap(ax, hot); hold(ax, 'on');
+    axis(ax, 'image'); axis(ax, 'off');
+    set(ax, 'Color', 'k');
+    set(fig, 'Color', [0.15 0.15 0.15]);
+    set(pnl, 'BackgroundColor', [0.9 0.9 0.9]);
     
     function [sld, lbl] = make_slider(name, bounds, ynorm, val)
         lbl = uicontrol('Parent', pnl, 'Style', 'text', 'Units', 'normalized', ...
@@ -59,12 +72,14 @@ function [final_mask, p] = interactive_specimen_mask(ci_matrix, init_p)
         
     function draw_left_cb(~, ~)
         title(ax, 'DRAWING LEFT EDGE: Click waypoints along the edge. Double-click to finish.', 'Color', 'y', 'FontSize', 11, 'FontWeight', 'bold');
+        if ~isempty(left_roi) && isvalid(left_roi), delete(left_roi); end
         try
             roi = drawpolyline(ax, 'Color', 'y', 'LineWidth', 2);
             if isvalid(roi) 
                 p.left_edge_x = roi.Position(:,1);
                 p.left_edge_y = roi.Position(:,2);
-                delete(roi);
+                left_roi = roi;
+                addlistener(left_roi, 'ROIMoved', @apply_cb);
             end
         catch ME
             error('Drawing failed: %s', ME.message);
@@ -74,12 +89,14 @@ function [final_mask, p] = interactive_specimen_mask(ci_matrix, init_p)
 
     function draw_right_cb(~, ~)
         title(ax, 'DRAWING RIGHT EDGE: Click waypoints along the edge. Double-click to finish.', 'Color', 'g', 'FontSize', 11, 'FontWeight', 'bold');
+        if ~isempty(right_roi) && isvalid(right_roi), delete(right_roi); end
         try
             roi = drawpolyline(ax, 'Color', 'g', 'LineWidth', 2);
             if isvalid(roi) 
                 p.right_edge_x = roi.Position(:,1);
                 p.right_edge_y = roi.Position(:,2);
-                delete(roi);
+                right_roi = roi;
+                addlistener(right_roi, 'ROIMoved', @apply_cb);
             end
         catch ME
             error('Drawing failed: %s', ME.message);
@@ -93,36 +110,46 @@ function [final_mask, p] = interactive_specimen_mask(ci_matrix, init_p)
         p.disp_max = get(sld_max, 'Value');
         p.snap_window = round(get(sld_snap, 'Value'));
         
+        if ~isempty(left_roi) && isvalid(left_roi)
+            p.left_edge_x = left_roi.Position(:,1);
+            p.left_edge_y = left_roi.Position(:,2);
+        end
+        if ~isempty(right_roi) && isvalid(right_roi)
+            p.right_edge_x = right_roi.Position(:,1);
+            p.right_edge_y = right_roi.Position(:,2);
+        end
+        
         % 1. Generate Mask from Traces and get calculated Edge Map
         [final_mask, Gmag] = compute_mask(ci_matrix, p);
         
         % 2. Update Display
-        axes(ax); cla(ax);
-        imagesc(ax, Gmag, [p.disp_min, p.disp_max]); 
-        colormap(ax, hot); hold(ax, 'on');
+        if isvalid(img_handle)
+            set(img_handle, 'CData', Gmag);
+            set(ax, 'CLim', [p.disp_min, p.disp_max]);
+        end
         
-        % Plot user traces
-        if isfield(p, 'left_edge_x') && ~isempty(p.left_edge_x)
-            plot(ax, p.left_edge_x, p.left_edge_y, 'y-o', 'LineWidth', 1.5, 'MarkerSize', 4);
+        if ~isempty(bound_handles)
+            delete(bound_handles(isvalid(bound_handles)));
         end
-        if isfield(p, 'right_edge_x') && ~isempty(p.right_edge_x)
-            plot(ax, p.right_edge_x, p.right_edge_y, 'g-o', 'LineWidth', 1.5, 'MarkerSize', 4);
-        end
-
-        % Plot resulting filled boundary (shows where the lines snapped to)
         if any(final_mask(:))
-            visboundaries(ax, final_mask, 'Color', 'r', 'LineWidth', 1.5);
+            bound_handles = visboundaries(ax, final_mask, 'Color', 'r', 'LineWidth', 1.5);
         end
         
-        axis(ax, 'image'); axis(ax, 'off');
         title(ax, 'Edge Map Preview (Red = Snapped Boundary)', 'Color', 'w', 'FontSize', 12);
-        set(ax, 'Color', 'k');
-        set(fig, 'Color', [0.15 0.15 0.15]);
-        set(pnl, 'BackgroundColor', [0.9 0.9 0.9]);
     end
     
     function save_cb(~, ~)
         set(fig, 'UserData', 'done');
+    end
+    
+    % Instantiate ROIs from initialization parameters before first render
+    if isfield(p, 'left_edge_x') && ~isempty(p.left_edge_x)
+        left_roi = drawpolyline(ax, 'Position', [p.left_edge_x, p.left_edge_y], 'Color', 'y', 'LineWidth', 2);
+        addlistener(left_roi, 'ROIMoved', @apply_cb);
+    end
+    if isfield(p, 'right_edge_x') && ~isempty(p.right_edge_x)
+        right_roi = drawpolyline(ax, 'Position', [p.right_edge_x, p.right_edge_y], 'Color', 'g', 'LineWidth', 2);
+        addlistener(right_roi, 'ROIMoved', @apply_cb);
     end
     
     apply_cb();

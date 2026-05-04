@@ -39,21 +39,31 @@ ipf_alpha = 0.55;
 % --------------------------------------------
 
 % --- GND TUNING PARAMETERS ---
-plot_gnds = true;          % Set to false to skip GND calculation and plotting
+plot_gnds = false;          % Set to false to skip GND calculation and plotting
 plot_ci_background = true; % Toggle CI background for GNDs
 gnd_alpha = 0.65;          % Opacity of the GND overlay when CI is active
 gnd_limits = [14.5, 16.5]; % Limits for log10(GND Density m^{-2})
 % --------------------------------------------
 
 % --- DIC STRAIN TUNING PARAMETERS ---
-plot_dic_strain = false;    % Toggle DIC Strain calculation and plotting
+plot_dic_strain = true;        % Toggle DIC Strain calculation and plotting
+plot_ci_background_dic = false; % Toggle CI background for DIC strain
+dic_alpha = 0.65;              % Opacity of the DIC overlay when CI is active
+dicColorRange = [0, 0.15];
 % --------------------------------------------
 
 % --- IPF TUNING PARAMETERS ---
 plot_ipf = false;           % Toggle IPF map calculation and plotting
+pf_dir = xvector;
+ipf_micron = 'on'; % 'off' or 'on'
 % --------------------------------------------
 
-pf_dir = yvector;
+% --- KAM TUNING PARAMETERS ---
+plot_kam = false;               % Toggle KAM map calculation and plotting
+plot_ci_background_kam = true; % Toggle CI background for KAM
+kam_alpha = 0.65;              % Opacity of the KAM overlay when CI is active
+kam_limits = [0, 1.5];           % Range for KAM angle in degrees
+% --------------------------------------------
 
 %% 3. Load Data & Loop over .ang files
 tkd_tilt = -10 * degree;
@@ -69,6 +79,35 @@ if plot_dic_strain
         ebsdUndef = undefData.newEBSD;
         ebsdUndef = ebsdUndef.gridify;
         
+        % --- Apply Specimen Mask to undeformed EBSD ---
+        undef_baseName = 'insitu Specimen 1 0 Map Data 1_BW263';
+        undef_mask_file = fullfile(baseDir, sprintf('%s_specimen_mask.mat', undef_baseName));
+        if exist(undef_mask_file, 'file')
+            fprintf('Applying specimen mask to undeformed data...\n');
+            undef_mask_data = load(undef_mask_file, 'specimenlocation');
+            
+            if isfield(ebsdUndef.prop, 'oldId')
+                % Map the 1D original mask to the aligned/warped dataset using exact IDs
+                old_id = ebsdUndef.prop.oldId;
+                valid_id = ~isnan(old_id);
+                mask_undef = false(size(old_id));
+                mask_undef(valid_id) = undef_mask_data.specimenlocation(old_id(valid_id));
+                ebsdUndef(~mask_undef) = 'notIndexed';
+            else
+                warning('oldId not found in ebsdUndef. Mask might be clipped due to coordinate warping.');
+                ebsd_1D_undef = EBSD.load(fullfile(baseDir, [undef_baseName '.ang']), CS, 'convertEuler2SpatialReferenceFrame', 'setting 2');
+                ebsd_1D_undef = rotate(ebsd_1D_undef, rotation.byAxisAngle(xvector, -70*degree + tkd_tilt), 'keepXY');
+                ebsd_1D_undef = rotate(ebsd_1D_undef, rotation.byAxisAngle(zvector, 180*degree), 'keepXY');
+                
+                valid_undef = ~isnan(ebsdUndef.x) & ~isnan(ebsdUndef.y);
+                idx_undef = knnsearch([ebsd_1D_undef.x(:), ebsd_1D_undef.y(:)], [ebsdUndef.x(valid_undef), ebsdUndef.y(valid_undef)]);
+                
+                undef_mask = false(size(ebsdUndef));
+                undef_mask(valid_undef) = undef_mask_data.specimenlocation(idx_undef);
+                ebsdUndef(~undef_mask) = 'notIndexed';
+            end
+        end
+
         % Compute tuned CI for the undeformed EBSD
         ci_raw_undef = ebsdUndef.ci;
         ci_min_undef = min(ci_raw_undef(:));
@@ -79,6 +118,7 @@ if plot_dic_strain
         ci_tuned_undef(ci_tuned_undef > 1) = 1;
         ci_tuned_undef = ci_tuned_undef .^ gammaVal;
         cibw_undef = [ci_tuned_undef(:), ci_tuned_undef(:), ci_tuned_undef(:)];
+        % cibw_undef(~ebsdUndef.isIndexed, :) = 0; % Mask out the background (black)
     else
         warning('Undeformed DIC MAT file not found at %s. DIC Strain plotting will be skipped.', undeformed_dic_mat);
         ebsdUndef = [];
@@ -87,7 +127,7 @@ if plot_dic_strain
 end
 
 % Find all .ang files in the directory
-angFiles = dir(fullfile(baseDir, '*.ang'));
+angFiles = dir(fullfile(baseDir, '*BW263.ang'));
 
 % angFiles = angFiles(1);
 
@@ -112,6 +152,14 @@ for i = 1:length(angFiles)
     if exist(mask_file, 'file')
         load(mask_file, 'specimenlocation');
         ebsd(~specimenlocation) = 'notIndexed';
+        
+        % --- Crop to the bounding box of the specimen location ---
+        valid_ebsd = ebsd(specimenlocation);
+        if length(valid_ebsd) > 0
+            xmin = min(valid_ebsd.x); xmax = max(valid_ebsd.x);
+            ymin = min(valid_ebsd.y); ymax = max(valid_ebsd.y);
+            ebsd = ebsd(inpolygon(ebsd, [xmin, ymin, xmax-xmin, ymax-ymin]));
+        end
     end
     
     ebsd = ebsd.gridify;
@@ -135,6 +183,9 @@ for i = 1:length(angFiles)
     % Create Nx3 array for RGB plotting
     cibw = [ci_tuned(:), ci_tuned(:), ci_tuned(:)];
     
+    % --- Apply mask to the visualization (make non-indexed/vacuum points black) ---
+    % cibw(~ebsd.isIndexed, :) = 0;
+    
     % --- Plotting IPF ---
     if plot_ipf
         % ipf = ipfColorKey(ebsd.CS);
@@ -142,7 +193,7 @@ for i = 1:length(angFiles)
         ipf.inversePoleFigureDirection = pf_dir;
         
         fig = figure('Name', currentFile, 'Visible', 'off'); % Set 'on' if you want to see them pop up
-        plot(ebsd, cibw, 'micronbar', 'off');
+        plot(ebsd, cibw, 'micronbar', ipf_micron);
         hold on;
         colors = ipf.orientation2color(ebsd('indexed').orientations);
         plot(ebsd('indexed'), colors, 'FaceAlpha', ipf_alpha);
@@ -163,6 +214,31 @@ for i = 1:length(angFiles)
         % The first argument must be the filename string, not a figure handle.
         exportScaledFigure(gcf, fullfile(outDir, sprintf('%s_%sTSL_ipf_TunedIQ_nomic.jpg', baseName, dirStr)), 'noDateString');
         close;
+    end
+    
+    % --- Plotting KAM ---
+    if plot_kam
+        fprintf('  Calculating and plotting KAM...\n');
+        % We calculate KAM using a 5 degree threshold to ignore high angle boundaries
+        kam = ebsd.KAM('threshold', 5*degree) ./ degree;
+        
+        fig_kam = figure('Name', ['KAM ', currentFile], 'Visible', 'off');
+        
+        if plot_ci_background_kam
+            plot(ebsd, cibw, 'micronbar', 'off');
+            hold on;
+            plot(ebsd, kam, 'micronbar', 'off', 'FaceAlpha', kam_alpha);
+        else
+            plot(ebsd, kam, 'micronbar', 'off');
+        end
+        
+        mtexColorMap viridis;
+        setColorRange(kam_limits);
+        mtexColorbar('title', 'KAM (deg)');
+        title(sprintf('Kernel Average Misorientation - %s', baseName), 'Interpreter', 'none');
+        
+        exportScaledFigure(fig_kam, fullfile(outDir, sprintf('%s_KAM.jpg', baseName)), 'noDateString');
+        close(fig_kam);
     end
     
     % Map ang file to DIC prefix
@@ -198,6 +274,31 @@ for i = 1:length(angFiles)
                 U(U == 0) = NaN;
                 V(V == 0) = NaN;
                 
+                % Fallback for empty increments (like the first increment)
+                if all(isnan(U(:)))
+                    fprintf('  Entire DIC field is NaN. Using footprint from next increment to display zero-strain.\n');
+                    next_prefix = '';
+                    switch dic_prefix
+                        case 'B0001', next_prefix = 'B0003';
+                        case 'B0003', next_prefix = 'B0005';
+                        case 'B0005', next_prefix = 'B0007';
+                        case 'B0007', next_prefix = 'B0009';
+                        case 'B0009', next_prefix = 'B0011';
+                        case 'B0011', next_prefix = 'B0014';
+                    end
+                    
+                    if ~isempty(next_prefix)
+                        next_u_field = [next_prefix, '_Displacements_x_displacement'];
+                        if isfield(ebsdUndef.prop, next_u_field)
+                            next_U = double(ebsdUndef.prop.(next_u_field));
+                            next_U(next_U == 0) = NaN;
+                            valid_mask = ~isnan(next_U);
+                            U(valid_mask) = 0;
+                            V(valid_mask) = 0;
+                        end
+                    end
+                end
+                
                 % Apply the SSLIP Gaussian filter to smooth displacements before gradient calculation
                 filt_opt.filt_std = 4;
                 try
@@ -220,14 +321,15 @@ for i = 1:length(angFiles)
                     Eeff_grid = sqrt(0.5*(Hxx - Hyy).^2 + 0.5*(Hxy + Hyx).^2);
                 end
                 Eeff = Eeff_grid(:);
+                % Eeff(~ebsdUndef.isIndexed) = NaN; % Apply mask to strain data
                 
                 % Plot
                 fig_strain = figure('Name', ['DIC Strain ', dic_prefix], 'Visible', 'off');
                 
-                if plot_ci_background
+                if plot_ci_background_dic
                     plot(ebsdUndef, cibw_undef, 'micronbar', 'off');
                     hold on;
-                    plot(ebsdUndef, Eeff, 'micronbar', 'off', 'FaceAlpha', gnd_alpha);
+                    plot(ebsdUndef, Eeff, 'micronbar', 'off', 'FaceAlpha', dic_alpha);
                 else
                     plot(ebsdUndef, Eeff, 'micronbar', 'off');
                 end
@@ -237,7 +339,7 @@ for i = 1:length(angFiles)
                 % if ~isempty(Eeff_valid)
                 %     setColorRange([0, prctile(Eeff_valid, 98)]);
                 % end
-                setColorRange([0, 0.1]);
+                setColorRange(dicColorRange);
                 mtexColorbar('title', 'Effective Shear Strain');
                 title(sprintf('DIC Effective Shear Strain - %s', dic_prefix));
                 

@@ -253,7 +253,7 @@ varColors = lines(length(tS_sym));
 nextAxis(1, 1);
 plot(grains_tkd, grains_tkd.meanOrientation, 'facealpha', 0.3); hold on;
 plot(parentGrains_tkd, 'facecolor', [0.8 0.8 0.8]);
-text(parentGrains_tkd, 'P', 'BackgroundColor', 'w', 'HorizontalAlignment', 'center');
+% text(parentGrains_tkd, 'P', 'BackgroundColor', 'w', 'HorizontalAlignment', 'center');
 
 primaryGrains_tkd = grains_tkd(isPrimary_tkd);
 varIds_tkd = primaryVariantId_tkd(isPrimary_tkd);
@@ -264,7 +264,7 @@ for v_idx = 1:length(uniqueVars_tkd)
     g_var = primaryGrains_tkd(varIds_tkd == variant);
     hold on;
     plot(g_var, 'facecolor', varColors(variant,:));
-    text(g_var, ['PV' num2str(variant)], 'HorizontalAlignment', 'center');
+    % text(g_var, ['PV' num2str(variant)], 'HorizontalAlignment', 'center');
 end
 
 secondaryGrains_tkd = grains_tkd(isSecondary_tkd);
@@ -285,7 +285,7 @@ hold off;
 nextAxis(1, 2);
 plot(grains_nm, grains_nm.meanOrientation, 'facealpha', 0.3); hold on;
 plot(parentGrains_nm, 'facecolor', [0.8 0.8 0.8]);
-text(parentGrains_nm, 'P', 'BackgroundColor', 'w', 'HorizontalAlignment', 'center');
+% text(parentGrains_nm, 'P', 'BackgroundColor', 'w', 'HorizontalAlignment', 'center');
 
 primaryGrains_nm = grains_nm(isPrimary_nm);
 varIds_nm = primaryVariantId_nm(isPrimary_nm);
@@ -296,7 +296,7 @@ for v_idx = 1:length(uniqueVars_nm)
     g_var = primaryGrains_nm(varIds_nm == variant);
     hold on
     plot(g_var, 'facecolor', varColors(variant,:));
-    text(g_var, ['PV' num2str(variant)], 'HorizontalAlignment', 'center');
+    % text(g_var, ['PV' num2str(variant)], 'HorizontalAlignment', 'center');
 end
 
 secondaryGrains_nm = grains_nm(isSecondary_nm);
@@ -305,7 +305,7 @@ if ~isempty(secondaryGrains_nm)
     plot(secondaryGrains_nm, 'facecolor', 'm');
     secIds = secondaryVariantId_nm(isSecondary_nm, :);
     labels = arrayfun(@(x) sprintf('T%d,%d', secIds(x,1), secIds(x,2)), 1:size(secIds,1), 'UniformOutput', false);
-    text(secondaryGrains_nm, labels, 'HorizontalAlignment', 'center');
+    % text(secondaryGrains_nm, labels, 'HorizontalAlignment', 'center');
 end
 hold on
 plot(grains_nm.boundary, 'linewidth', 1.5, 'linecolor', 'k');

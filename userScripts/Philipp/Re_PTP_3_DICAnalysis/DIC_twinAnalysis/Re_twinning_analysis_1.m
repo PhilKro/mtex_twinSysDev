@@ -10,7 +10,7 @@ plotx2east
 plotzIntoPlane
 
 
-inc = 5;
+inc = 2;
 CS = grains{inc}.CS;
 
 comment = '_filt3';
@@ -268,12 +268,14 @@ Exx = squeeze(E.M(1,1,:));
 Exy = squeeze(E.M(1,2,:));
 Eyy = squeeze(E.M(2,2,:));
 
-cl = [-0.15 0.15];
+cl = [-0.25 0.25];
 
 figure;
 newMtexFigure('layout',[1,3])
 % Plot the base grain map with some transparency
 plot(grains{inc}, grains{inc}.meanOrientation, 'facealpha', 0.1)
+hold on
+plot(parentGrains, zeros(size(parentGrains)))
 hold on
 plot(primaryGrains,Exx);
 caxis(cl)
@@ -281,6 +283,8 @@ title('E_{xx}')
 
 nextAxis
 plot(grains{inc}, grains{inc}.meanOrientation, 'facealpha', 0.1)
+hold on
+plot(parentGrains, zeros(size(parentGrains)))
 hold on
 plot(primaryGrains,Exy);
 caxis(cl)
@@ -295,6 +299,8 @@ title('E_{xy}')
 
 nextAxis
 plot(grains{inc}, grains{inc}.meanOrientation, 'facealpha', 0.1)
+hold on
+plot(parentGrains, zeros(size(parentGrains)))
 hold on
 plot(primaryGrains,Eyy);
 caxis(cl)
@@ -556,7 +562,7 @@ E_exp(2,2,:) = ebsd{inc}.prop.eyy2(:);
 disp('Calculating shape mismatch and magnitude across the entire map...');
 
 % Define cutoff criteria
-magCutoff = 0.27; 
+magCutoff = 0.22; 
 shapeCutoff = 0.5; 
 
 % Flatten the experimental strain tensors

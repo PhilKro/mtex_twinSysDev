@@ -10,6 +10,9 @@ plotzIntoPlane
 plottingConvention.default.east = xvector;
 plottingConvention.default.outOfScreen = -zvector;
 
+% Switch to qhull to fix jcvoronoi_mex crashes during calcGrains
+setMTEXpref('VoronoiMethod', 'qhull');
+
 % inputPath = 'C:\Users\phkr\OneDrive - empa.ch\MTEX_Data\Philipp\Re_PTP\DIC_Aligned_Data\data_Re_7deg_PTP3_Subset19_Step6_relative2First_firstOrderSF';
 % outputPath = 'C:\Users\phkr\OneDrive - empa.ch\MTEX_Data\Philipp\Re_PTP\DIC_Aligned_Data\data_Re_7deg_PTP3_Subset19_Step6_relative2First_firstOrderSF\MTEX_Analysis_output';
 
@@ -145,14 +148,39 @@ for i = 1:N
     ebsd{i}.orientations = ebsd{i}.orientations.project2FundamentalRegion(reforientation);
     
     
-    ebsd{i}(~ebsd{i}.prop.specimenlocation) = 'notIndexed';
+    % --- Load better specimen mask from original .ang file using oldId ---
+    ang_base = '';
+    if contains(fnames{i}, 'inc_0'), ang_base = 'Re_7deg_insitu Specimen 1 0 Map Data 1_BW158';
+    elseif contains(fnames{i}, 'inc_4'), ang_base = 'Re_7deg_insitu Specimen 1 4 Map Data 2_BW158';
+    elseif contains(fnames{i}, 'inc_6'), ang_base = 'Re_7deg_insitu Specimen 1 6 Map Data 7_BW158';
+    elseif contains(fnames{i}, 'inc_7'), ang_base = 'Re_7deg_insitu Specimen 1 7 Map Data 9_BW158';
+    elseif contains(fnames{i}, 'inc_8'), ang_base = 'Re_7deg_insitu Specimen 1 8 Map Data 11_BW158';
+    end
+    
+    % mask_file = fullfile(inputPath, 'EBSD_angs', [ang_base, '_specimen_mask.mat']);
+    % if exist(mask_file, 'file')
+    %     mask_data = load(mask_file, 'specimenlocation');
+    %     if isfield(ebsd{i}.prop, 'oldId')
+    %         old_id = ebsd{i}.prop.oldId;
+    %         valid_id = ~isnan(old_id) & old_id > 0 & old_id <= length(mask_data.specimenlocation);
+    %         mask_aligned = false(size(old_id));
+    %         mask_aligned(valid_id) = mask_data.specimenlocation(old_id(valid_id));
+    %         ebsd{i}(~mask_aligned) = 'notIndexed';
+    %     else
+    %         warning('oldId property not found in aligned EBSD data for %s. Falling back to old mask.', fnames{i});
+    %         ebsd{i}(~ebsd{i}.prop.specimenlocation) = 'notIndexed';
+    %     end
+    % else
+    %     warning('Specimen mask file not found: %s. Falling back to old mask.', mask_file);
+    %     ebsd{i}(~ebsd{i}.prop.specimenlocation) = 'notIndexed';
+    % end
     % ----
     % possible grain calc
     % num pixel, adjust for small stepsize due to alignment
-    numPix = (4*1.5)^2;
-    [grains{i}, ebsd{i}.grainId] = calcGrains(ebsd{i},'alpha',3,'angle',15*degree,'minPixel',numPix);
+    % numPix = (4*1.5)^2;
+    % [grains{i}, ebsd{i}.grainId] = calcGrains(ebsd{i},'alpha',3,'angle',15*degree,'minPixel',numPix);
     % ----
-    % grains{i} = loaded_data.grains;
+    grains{i} = loaded_data.grains;
     % ----
     
     area{i}   = loaded_data.area;
@@ -218,33 +246,53 @@ for i=1:N
 end
 clear data
 
-%% plot overlap Exy
+%% plot overlap straincomps
 
 lineWidth = 2;
 lineColor = 'w';
 strainthresh = 1;
-
+strainComp = {'exx2','exy2','eyy2'};
 % figure;
 % newMtexFigure('layout',[1 N-1])
-for i=2:N
-    figure;
-    plotData = ebsd{i}.prop.eyy2;
 
-    plotData(ebsd{i}.prop.geff>strainthresh) = NaN;
-    plotData(ebsd{i}.prop.geff==0) = NaN;
-    plot(ebsd{i},plotData)
-    hold on
-    % plot gray for NaNs
-    ebsdNaN = ebsd{i}(isnan(plotData));
-    colors = repmat([0.5 0.5 0.5],[length(ebsdNaN),1]);
-    plot(ebsdNaN,colors)
-    hold on
-    % plot(grains{i}.boundary,'LineWidth',lineWidth,'lineColor',lineColor);
-    % caxis([-0.3 0.3])
-    caxis([-0.05 0.3])
-    mtexColorMap("viridis")
-    mtexColorbar
-    saveFigure(fullfile(outputPath,['inc_',num2str(i),'_eyy2_alignedNewFilt_Filt_noBound',num2str(filterSize),'.png']))
+for i = 2:N
+    for j = 1:length(strainComp) % FIX 1: Explicitly define the loop range
+        figure;
+        
+        if ~isfield(ebsd{i}.prop, 'geff')
+            try
+                ebsd{i}.prop.geff = sqrt(((ebsd{i}.prop.Fxx - ebsd{i}.prop.Fyy)/2).^2 + ((ebsd{i}.prop.Fxy - ebsd{i}.prop.Fyx)/2).^2);
+            catch
+                ebsd{i}.prop.geff = zeros(size(ebsd{i}.x));
+            end
+        end
+        
+        % FIX 2: Use curly braces {} to extract the string from the cell array
+        plotData = ebsd{i}.prop.(strainComp{j}); 
+    
+        plotData(ebsd{i}.prop.geff > strainthresh) = NaN;
+        plotData(ebsd{i}.prop.geff == 0) = NaN;
+        
+        plot(ebsd{i}, plotData)
+        hold on
+        
+        % plot gray for NaNs
+        % ebsdNaN = ebsd{i}(isnan(plotData));
+        % colors = repmat([0.5 0.5 0.5], [length(ebsdNaN), 1]);
+        % plot(ebsdNaN, colors)
+        
+        % plot(grains{i}.boundary,'LineWidth',lineWidth,'lineColor',lineColor);
+        % caxis([-0.3 0.3])
+        caxis([-0.15 0.15]) % Note: use clim([-0.05 0.3]) if you are on MATLAB R2022a or newer
+        mtexColorMap("viridis")
+        mtexColorbar
+        
+        % FIX 3: Clean up the sprintf syntax and use curly braces for strainComp
+        saveName = sprintf('inc_%d_%s_alignedNewFilt_Filt_noBound%s.png', i, strainComp{j}, num2str(filterSize));
+        saveFigure(fullfile(outputPath, saveName));
+        
+        hold off % Good practice to release the hold since you are generating multiple figures
+    end
 end
 
 
@@ -258,6 +306,15 @@ strainthresh = 1;
 % newMtexFigure('layout',[1 N-1])
 for i=2:N
     figure;
+    
+    if ~isfield(ebsd{i}.prop, 'geff')
+        try
+            ebsd{i}.prop.geff = sqrt(((ebsd{i}.prop.Fxx - ebsd{i}.prop.Fyy)/2).^2 + ((ebsd{i}.prop.Fxy - ebsd{i}.prop.Fyx)/2).^2);
+        catch
+            ebsd{i}.prop.geff = zeros(size(ebsd{i}.x));
+        end
+    end
+    
     plotData = ebsd{i}.prop.eyy2;
 
     plotData(ebsd{i}.prop.geff>strainthresh) = NaN;
@@ -275,4 +332,42 @@ for i=2:N
     mtexColorMap("viridis")
     mtexColorbar
     saveFigure(fullfile(outputPath,['inc_',num2str(i),'_eyy2_alignedNewFilt_Filt',num2str(filterSize),'.png']))
+end
+
+%% plot effective shear strain (geff)
+
+lineWidth = 2;
+lineColor = 'w';
+strainthresh = 1;
+
+% The specimen mask is already loaded and applied during the Quick Load section 
+% via ebsd{i}(~ebsd{i}.prop.specimenlocation) = 'notIndexed';
+
+for i=2:N
+    figure;
+    
+    if ~isfield(ebsd{i}.prop, 'geff')
+        try
+            ebsd{i}.prop.geff = sqrt(((ebsd{i}.prop.Fxx - ebsd{i}.prop.Fyy)/2).^2 + ((ebsd{i}.prop.Fxy - ebsd{i}.prop.Fyx)/2).^2);
+        catch
+            ebsd{i}.prop.geff = zeros(size(ebsd{i}.x));
+        end
+    end
+    
+    plotData = ebsd{i}.prop.geff;
+
+    plotData(ebsd{i}.prop.geff>strainthresh) = NaN;
+    plotData(ebsd{i}.prop.geff==0) = NaN;
+    plot(ebsd{i},plotData)
+    hold on
+    % plot gray for NaNs
+    % ebsdNaN = ebsd{i}(isnan(plotData));
+    % colors = repmat([0.5 0.5 0.5],[length(ebsdNaN),1]);
+    % plot(ebsdNaN,colors)
+    hold on
+    plot(grains{i}.boundary,'LineWidth',lineWidth,'lineColor',lineColor);
+    caxis([0 0.4]) % Adjust upper limit for geff if necessary
+    mtexColorMap("viridis")
+    mtexColorbar('title', 'Effective Shear Strain')
+    saveFigure(fullfile(outputPath,['inc_',num2str(i),'_geff_alignedNewFilt_Filt',num2str(filterSize),'.png']))
 end

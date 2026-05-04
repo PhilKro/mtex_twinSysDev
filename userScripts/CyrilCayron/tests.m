@@ -1,8 +1,26 @@
 CS = crystalSymmetry('6/mmm',[3.21 3.21 5.21],'x||a','mineral','Magnesium');
 
-[testTwins, testStruct] =  twinSystem.calculateTheoreticalTwins(CS,2,6);
-angle(testTwins.k1, Miller(1,0,-1,2,testTwins.CS))<1e-5;
-log1012 = angle(testTwins.k1, Miller(0,1,-1,2,testTwins.CS),'noSymmetry')<1e-5;
+% [testTwins, testStruct] =  twinSystem.calculateTheoreticalTwins(CS,2,1);
+% [testTwins, testStruct] =  twinSystem.calculateTheoreticalTwins(CS,Miller(0,1,-1,2,CS),8);
+[testTwins, testStruct] =  twinSystem.calculateTheoreticalTwins(CS,Miller(1,1,-2,2,CS),8);
+% [testTwins, testStruct] =  twinSystem.calculateTheoreticalTwins(CS,Miller(1,1,-2,1,CS),8);
+% [testTwins, testStruct] =  twinSystem.calculateTheoreticalTwins(CS,Miller(0,0,0,1,CS),8);
+twinSystem.printTheoreticalTwins(testStruct);
+testTwins
 
-twinSystem.printTheoreticalTwins(testStruct(log1012))
-% COMPARE TO THE ORIGINAL PROGRAM QUITE SOME DIFFERENCES, SOME STUFF IS CORRECT SOME NOT
+%% cubic FCC
+CS_cube = crystalSymmetry('m3m',[1 1 1],'mineral','cubic');
+[testTwins, testStruct] =  twinSystem.calculateTheoreticalTwins(CS_cube,Miller(1,1,1,CS_cube),8, 'FCC');
+
+twinSystem.printTheoreticalTwins(testStruct);
+testTwins
+%% cubic BCC
+CS_cube = crystalSymmetry('m3m',[1 1 1],'mineral','cubic');
+[testTwins, testStruct] =  twinSystem.calculateTheoreticalTwins(CS_cube,Miller(1,1,2,CS_cube),8, 'BCC');
+
+twinSystem.printTheoreticalTwins(testStruct);
+testTwins
+%% plot shear plane
+
+twinSystem.plotShearPlane(Miller(0,1,-1,2,CS), 1:5)
+% SumTingWong
