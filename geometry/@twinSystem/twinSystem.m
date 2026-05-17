@@ -738,6 +738,161 @@ classdef twinSystem
                 error('Second argument must be a Miller object (for a single plane) or a numeric value (for max Miller index).');
             end
         end
+
+       function plotShearPlane(plane, qRange, structName, defaultQ)
+            % Ensure default variables are set
+            if nargin < 4, defaultQ = 1; end
+            if nargin < 3, structName = 'none'; end
+            if nargin < 2, qRange = 1:4; end
+            
+            cs = plane.CS;
+            
+            [~, twin_structs] = twinSystem.calculateForPlane(plane, qRange, structName);
+            maxQ = max(qRange);
+            
+            h = round(plane.h); k = round(plane.k); l = round(plane.l);
+            G_rec = inv(cs.metricTensor);
+            
+            [OZ1, U, V] = twinSystem.Bezout3D(plane);
+            [~, U, V] = twinSystem.findUV(0.5*U, 0.5*V, structName);
+            
+            ap = [h; k; l];
+            apD = G_rec * ap;
+            dhkl2 = 1 / (ap' * apD);
+            OH1_vec = dhkl2 * apD;
+            
+            G_dir = cs.metricTensor;
+            
+            % --- PROJECTION LOGIC ---
+            if isempty(twin_structs)
+                warning('No theoretical twins found to plot.');
+                return;
+            end
+            
+            % Find the target twin for the default Q to orient the projection
+            idx = find([twin_structs.q] == defaultQ);
+            if ~isempty(idx)
+                target_twin = twin_structs(idx(1));
+            else
+                warning('Default q=%d not found in evaluated modes. Using q=%d as default.', defaultQ, twin_structs(1).q);
+                target_twin = twin_structs(1);
+            end
+            
+            eta1_vec = target_twin.eta1.uvw';
+            
+            % Redefine X-axis projection to be the TRUE shear direction (eta1)
+            norm_eta1 = sqrt(eta1_vec' * G_dir * eta1_vec);
+            projX = @(vec) (vec' * G_dir * eta1_vec) / norm_eta1;
+            
+            % Y-axis remains the true geometric normal to K1
+            norm_OH1 = sqrt(OH1_vec' * G_dir * OH1_vec);
+            projY = @(vec) (vec' * G_dir * OH1_vec) / norm_OH1;
+            
+            % Define the geometric normal to the plane of shear
+            plane_of_shear_normal = cross(eta1_vec, OH1_vec); 
+            pos_normal_norm = norm(plane_of_shear_normal);
+            
+            % Generate a massive 3D supercell to guarantee coverage across wide aspect ratios
+            grid_range = 60; 
+            [U_grid, V_grid, M_grid] = ndgrid(-grid_range:grid_range, -grid_range:grid_range, 0:maxQ+2);
+            
+            % Vectorized calculation of all atom 3D positions (3xN matrix)
+            atoms3D = U.uvw' * U_grid(:)' + V.uvw' * V_grid(:)' + OZ1.uvw' * M_grid(:)';
+            
+            % Distance to plane of shear for all atoms (1xN array)
+            dists = abs(plane_of_shear_normal' * atoms3D) / pos_normal_norm;
+            
+            % Filter atoms exactly on the plane of shear
+            valid_idx = dists < 1e-4;
+            valid_atoms = atoms3D(:, valid_idx);
+            
+            % Project valid atoms to 2D
+            X_all = (eta1_vec' * G_dir * valid_atoms) / norm_eta1;
+            Y_all = (OH1_vec' * G_dir * valid_atoms) / norm_OH1;
+            
+            % --- DYNAMIC BOUNDING BOX LOGIC ---
+            % Total Y height of the plotted layers
+            total_y_height = projY(maxQ * OH1_vec);
+            
+            % Gather all X coordinates of the shear arrows to ensure they are never cut off
+            all_x_ends = zeros(1, length(twin_structs));
+            for i = 1:length(twin_structs)
+                all_x_ends(i) = projX(twin_structs(i).eta2.uvw');
+            end
+            
+            % Base window covers origin (0) and all arrows
+            X_min_base = min([0, all_x_ends]);
+            X_max_base = max([0, all_x_ends]);
+            
+            % Dynamic padding: guarantee a wide aspect ratio based on plot height
+            % This forces Hexagonal systems with small shears to still render a nicely sized grid
+            padding_x = max(1.5 * total_y_height, 2 * norm_eta1);
+            
+            % Final window for cropping atoms
+            X_min = X_min_base - padding_x;
+            X_max = X_max_base + padding_x;
+            
+            % Crop the atoms to the viewing window
+            plot_idx = (X_all >= X_min) & (X_all <= X_max);
+            X_atoms = X_all(plot_idx);
+            Y_atoms = Y_all(plot_idx);
+            
+            % --- PLOTTING LOGIC ---
+            figure;
+            hold on;
+            scatter(X_atoms, Y_atoms, 'o', 'MarkerEdgeColor', 'k', 'MarkerFaceColor', 'none');
+            
+            % Draw Trace of K1 (spanning exactly our plotted atoms)
+            plot([X_min, X_max], [0, 0], 'r-', 'LineWidth', 2);
+            
+            % Draw Q layer heights
+            for q = 1:maxQ
+                y_height = projY(q * OH1_vec);
+                plot([X_min, X_max], [y_height, y_height], 'r--');
+            end
+            
+            % Draw Plane Normal
+            max_y_height = projY(maxQ * OH1_vec);
+            plot([0, 0], [0, max_y_height], 'k-');
+            
+            axis equal;
+            title(sprintf('Plane of Shear Projection: K1 = %s (Aligned to q=%d)', char(plane), target_twin.q));
+            xlabel('Shear Direction (\eta_1)');
+            ylabel('Plane Normal (OH_1)');
+            
+            % Plot twin shear vectors
+            for i = 1:length(twin_structs)
+                OA = twin_structs(i).eta2.uvw';
+                x_end = projX(OA);
+                y_end = projY(OA);
+                
+                % Check if this mode shares the same plane of shear as our target
+                current_eta1 = twin_structs(i).eta1.uvw';
+                current_pos_normal = cross(current_eta1, OH1_vec);
+                
+                % Normalize normals to compare them via dot product
+                n1 = plane_of_shear_normal / pos_normal_norm;
+                n2 = current_pos_normal / norm(current_pos_normal);
+                
+                % If dot product is close to 1 or -1, they are parallel (Same PoS)
+                if abs(abs(dot(n1, n2)) - 1) < 1e-4
+                    quiver(0, 0, x_end, y_end, 0, 'b', 'LineWidth', 1.5, 'MaxHeadSize', 0.5);
+                    text(x_end, y_end, sprintf(' q=%d, S: %.3f', twin_structs(i).q, twin_structs(i).shear), ...
+                        'VerticalAlignment', 'bottom', 'Color', 'b');
+                else
+                    % Different Plane of Shear, Annotate differently (Dashed Red)
+                    quiver(0, 0, x_end, y_end, 0, 'r', 'LineStyle', '--', 'LineWidth', 1.5, 'MaxHeadSize', 0.5);
+                    text(x_end, y_end, sprintf(' q=%d (Diff PoS)', twin_structs(i).q), ...
+                        'VerticalAlignment', 'top', 'Color', 'r');
+                end
+            end
+            
+            % Explicitly set axes limits to our cropped box to present a clean, rectangular view
+            xlim([X_min, X_max]);
+            ylim([-0.5 * norm_OH1, max_y_height + norm_OH1]);
+            
+            hold off;
+        end
     end
 
     methods (Static, Access = private)
@@ -1058,10 +1213,9 @@ classdef twinSystem
                 % from our reference atom (OZ) to the closest real atom.
                 ZA = nU * U.uvw' + nV * V.uvw';
                 
-                % Candidate 1
                 % Add the adjustment walk (ZA) to our initial reference atom (OZ).
                 % OA is now the true vector from the origin to the closest physical atom on the q-th plane.
-                % This is candidate 1 for the conjugate shear direction (eta2).
+                % This is the shear direction (eta2).
                 OA = OZ + ZA;           
                 
                 % This is the remaining distance between our closest physical atom (OA) 
