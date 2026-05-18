@@ -739,13 +739,63 @@ classdef twinSystem
             end
         end
 
-       function plotShearPlane(plane, qRange, structName, defaultQ)
+       function plotShearPlane(plane, qRange, structName, defaultQ, plotTwinned)
+            % PLOTSHEARPLANE Visualizes the 2D plane of shear for a given twin system.
+            %
+            % This method generates a 2D projection of the crystal lattice strictly
+            % along the plane of shear defined by a candidate twin plane (K1) and its
+            % calculated shear direction (eta1). By optionally plotting both the 
+            % parent and twinned lattices, it can generate a 2D dichromatic pattern, 
+            % allowing for visual confirmation of the fraction of coincident lattice 
+            % sites corresponding to the twin index (q).
+            %
+            % Syntax:
+            %   twinSystem.plotShearPlane(plane)
+            %   twinSystem.plotShearPlane(plane, qRange)
+            %   twinSystem.plotShearPlane(plane, qRange, structName)
+            %   twinSystem.plotShearPlane(plane, qRange, structName, defaultQ)
+            %   twinSystem.plotShearPlane(plane, qRange, structName, defaultQ, plotTwinned)
+            %
+            % Inputs:
+            %   plane       - (Miller) The candidate twin plane (K1).
+            %   qRange      - (numeric array) Range of twin indices to evaluate. 
+            %                 Default is 1:4.
+            %   structName  - (string/char) Crystal structure type ('FCC', 'BCC', 
+            %                 'HCP', or 'none'). Used to apply centering rules and 
+            %                 plot specific atomic motifs (like HCP non-lattice atoms). 
+            %                 Default is 'none'.
+            %   defaultQ    - (integer) The specific twin index (q) whose shear 
+            %                 direction (eta1) is used as the X-axis for the projection. 
+            %                 Default is 1.
+            %   plotTwinned - (logical) If true, overlays the sheared twinned lattice 
+            %                 in red using the macroscopic deformation gradient (F). 
+            %                 Default is false.
+            %
+            % Plot Details:
+            %   * Parent Lattice: Plotted as black open circles.
+            %   * Twinned Lattice: Plotted as red open circles (if requested).
+            %   * HCP Motif: Plotted as triangles (black/red) if structName is 'HCP'.
+            %   * K1 Trace: Thick solid red line at Y = 0.
+            %   * q Layers: Dashed red horizontal lines indicating the geometric step heights.
+            %   * Shear Vectors (eta2):
+            %       - Solid Blue Triangle: The mode shares the exact same plane of shear 
+            %         as the defaultQ mode.
+            %       - Dashed Red Triangle: The mode exists on a divergent plane of shear 
+            %         and is only shown for reference.
+            %
+            % Note:
+            %   The viewing window is dynamically bounded based on the total vertical 
+            %   layer height to ensure stable aspect ratios across crystal systems with 
+            %   vastly different shear magnitudes (e.g., cubic vs. hexagonal).
+        
             % Ensure default variables are set
+            if nargin < 5, plotTwinned = false; end
             if nargin < 4, defaultQ = 1; end
             if nargin < 3, structName = 'none'; end
             if nargin < 2, qRange = 1:4; end
             
             cs = plane.CS;
+            isHCP = strcmpi(structName, 'HCP') && cs.lattice.isTriHex;
             
             [~, twin_structs] = twinSystem.calculateForPlane(plane, qRange, structName);
             maxQ = max(qRange);
@@ -780,11 +830,11 @@ classdef twinSystem
             
             eta1_vec = target_twin.eta1.uvw';
             
-            % Redefine X-axis projection to be the TRUE shear direction (eta1)
+            % Redefine X-axis projection to be the shear direction (eta1)
             norm_eta1 = sqrt(eta1_vec' * G_dir * eta1_vec);
             projX = @(vec) (vec' * G_dir * eta1_vec) / norm_eta1;
             
-            % Y-axis remains the true geometric normal to K1
+            % Y-axis is the true geometric normal to K1
             norm_OH1 = sqrt(OH1_vec' * G_dir * OH1_vec);
             projY = @(vec) (vec' * G_dir * OH1_vec) / norm_OH1;
             
@@ -792,7 +842,7 @@ classdef twinSystem
             plane_of_shear_normal = cross(eta1_vec, OH1_vec); 
             pos_normal_norm = norm(plane_of_shear_normal);
             
-            % Generate a massive 3D supercell to guarantee coverage across wide aspect ratios
+            % Generate a 3D supercell to guarantee coverage across wide aspect ratios
             grid_range = 60; 
             [U_grid, V_grid, M_grid] = ndgrid(-grid_range:grid_range, -grid_range:grid_range, 0:maxQ+2);
             
@@ -806,15 +856,44 @@ classdef twinSystem
             valid_idx = dists < 1e-4;
             valid_atoms = atoms3D(:, valid_idx);
             
-            % Project valid atoms to 2D
+            % Project valid lattice atoms to 2D
             X_all = (eta1_vec' * G_dir * valid_atoms) / norm_eta1;
             Y_all = (OH1_vec' * G_dir * valid_atoms) / norm_OH1;
             
+            % HCP Motif Logic
+            if isHCP
+                % HCP motif shift: 1/3 a + 2/3 b + 1/2 c
+                hcp_shift = [1/3; 2/3; 1/2];
+                hcp_atoms3D = atoms3D + hcp_shift;
+                
+                % Filter HCP atoms on the plane of shear
+                dists_hcp = abs(plane_of_shear_normal' * hcp_atoms3D) / pos_normal_norm;
+                valid_hcp_idx = dists_hcp < 1e-4;
+                valid_hcp_atoms = hcp_atoms3D(:, valid_hcp_idx);
+                
+                % Project valid HCP atoms to 2D
+                X_hcp_all = (eta1_vec' * G_dir * valid_hcp_atoms) / norm_eta1;
+                Y_hcp_all = (OH1_vec' * G_dir * valid_hcp_atoms) / norm_OH1;
+            end
+            
+            % Twinned Lattice Logic
+            if plotTwinned
+                % The deformation gradient F transforms the direct space to the sheared twin space
+                twinned_atoms3D = target_twin.F * valid_atoms;
+                X_tw_all = (eta1_vec' * G_dir * twinned_atoms3D) / norm_eta1;
+                Y_tw_all = (OH1_vec' * G_dir * twinned_atoms3D) / norm_OH1;
+                
+                if isHCP
+                    twinned_hcp_atoms3D = target_twin.F * valid_hcp_atoms;
+                    X_hcp_tw_all = (eta1_vec' * G_dir * twinned_hcp_atoms3D) / norm_eta1;
+                    Y_hcp_tw_all = (OH1_vec' * G_dir * twinned_hcp_atoms3D) / norm_OH1;
+                end
+            end
+            
             % --- DYNAMIC BOUNDING BOX LOGIC ---
-            % Total Y height of the plotted layers
             total_y_height = projY(maxQ * OH1_vec);
             
-            % Gather all X coordinates of the shear arrows to ensure they are never cut off
+            % Gather all X coordinates of the shear arrows
             all_x_ends = zeros(1, length(twin_structs));
             for i = 1:length(twin_structs)
                 all_x_ends(i) = projX(twin_structs(i).eta2.uvw');
@@ -824,25 +903,55 @@ classdef twinSystem
             X_min_base = min([0, all_x_ends]);
             X_max_base = max([0, all_x_ends]);
             
-            % Dynamic padding: guarantee a wide aspect ratio based on plot height
-            % This forces Hexagonal systems with small shears to still render a nicely sized grid
+            % Dynamic padding
             padding_x = max(1.5 * total_y_height, 2 * norm_eta1);
-            
-            % Final window for cropping atoms
             X_min = X_min_base - padding_x;
             X_max = X_max_base + padding_x;
             
-            % Crop the atoms to the viewing window
+            % Crop the parent lattice atoms to the viewing window
             plot_idx = (X_all >= X_min) & (X_all <= X_max);
             X_atoms = X_all(plot_idx);
             Y_atoms = Y_all(plot_idx);
             
+            if isHCP
+                plot_hcp_idx = (X_hcp_all >= X_min) & (X_hcp_all <= X_max);
+                X_hcp = X_hcp_all(plot_hcp_idx);
+                Y_hcp = Y_hcp_all(plot_hcp_idx);
+            end
+            
+            % Crop the twinned lattice atoms to the viewing window
+            if plotTwinned
+                plot_tw_idx = (X_tw_all >= X_min) & (X_tw_all <= X_max);
+                X_tw_atoms = X_tw_all(plot_tw_idx);
+                Y_tw_atoms = Y_tw_all(plot_tw_idx);
+                
+                if isHCP
+                    plot_hcp_tw_idx = (X_hcp_tw_all >= X_min) & (X_hcp_tw_all <= X_max);
+                    X_hcp_tw = X_hcp_tw_all(plot_hcp_tw_idx);
+                    Y_hcp_tw = Y_hcp_tw_all(plot_hcp_tw_idx);
+                end
+            end
+            
             % --- PLOTTING LOGIC ---
             figure;
             hold on;
-            scatter(X_atoms, Y_atoms, 'o', 'MarkerEdgeColor', 'k', 'MarkerFaceColor', 'none');
             
-            % Draw Trace of K1 (spanning exactly our plotted atoms)
+            
+            % 1. Plot Parent Lattice (Black)
+            scatter(X_atoms, Y_atoms, 'o', 'MarkerEdgeColor', 'k', 'MarkerFaceColor', 'none');
+            if isHCP
+                scatter(X_hcp, Y_hcp, '^', 'MarkerEdgeColor', 'k', 'MarkerFaceColor', 'none');
+            end
+            
+            % 2. Plot Twinned Lattice (Red)
+            if plotTwinned
+                scatter(X_tw_atoms, Y_tw_atoms, 'o', 'MarkerEdgeColor', 'r', 'MarkerFaceColor', 'none');
+                if isHCP
+                    scatter(X_hcp_tw, Y_hcp_tw, '^', 'MarkerEdgeColor', 'r', 'MarkerFaceColor', 'none');
+                end
+            end
+            
+            % Draw Trace of K1
             plot([X_min, X_max], [0, 0], 'r-', 'LineWidth', 2);
             
             % Draw Q layer heights
@@ -860,7 +969,7 @@ classdef twinSystem
             xlabel('Shear Direction (\eta_1)');
             ylabel('Plane Normal (OH_1)');
             
-            % Plot twin shear vectors
+            % Plot twin shear vectors with solid triangles
             for i = 1:length(twin_structs)
                 OA = twin_structs(i).eta2.uvw';
                 x_end = projX(OA);
@@ -870,24 +979,52 @@ classdef twinSystem
                 current_eta1 = twin_structs(i).eta1.uvw';
                 current_pos_normal = cross(current_eta1, OH1_vec);
                 
-                % Normalize normals to compare them via dot product
                 n1 = plane_of_shear_normal / pos_normal_norm;
                 n2 = current_pos_normal / norm(current_pos_normal);
                 
-                % If dot product is close to 1 or -1, they are parallel (Same PoS)
+                % Determine colors and styles
                 if abs(abs(dot(n1, n2)) - 1) < 1e-4
-                    quiver(0, 0, x_end, y_end, 0, 'b', 'LineWidth', 1.5, 'MaxHeadSize', 0.5);
-                    text(x_end, y_end, sprintf(' q=%d, S: %.3f', twin_structs(i).q, twin_structs(i).shear), ...
-                        'VerticalAlignment', 'bottom', 'Color', 'b');
+                    col = 'b';
+                    ls = '-';
+                    lbl = sprintf(' q=%d, S: %.3f', twin_structs(i).q, twin_structs(i).shear);
+                    valign = 'bottom';
                 else
-                    % Different Plane of Shear, Annotate differently (Dashed Red)
-                    quiver(0, 0, x_end, y_end, 0, 'r', 'LineStyle', '--', 'LineWidth', 1.5, 'MaxHeadSize', 0.5);
-                    text(x_end, y_end, sprintf(' q=%d (Diff PoS)', twin_structs(i).q), ...
-                        'VerticalAlignment', 'top', 'Color', 'r');
+                    col = 'r';
+                    ls = '--';
+                    lbl = sprintf(' q=%d (Diff PoS)', twin_structs(i).q);
+                    valign = 'top';
                 end
+                
+                % Draw the main line of the vector
+                plot([0, x_end], [0, y_end], 'Color', col, 'LineStyle', ls, 'LineWidth', 1.5);
+                
+                % Draw the filled triangle arrowhead
+                vec_len = sqrt(x_end^2 + y_end^2);
+                if vec_len > 1e-4
+                    head_L = min((X_max - X_min) * 0.02, vec_len * 0.3);
+                    head_W = head_L * 0.75;
+                    
+                    theta_arrow = atan2(y_end, x_end);
+                    
+                    % Base points of the triangle
+                    P_base = [0, 0; -head_L, head_W/2; -head_L, -head_W/2];
+                    
+                    % Rotation matrix
+                    R = [cos(theta_arrow), -sin(theta_arrow); sin(theta_arrow), cos(theta_arrow)];
+                    
+                    % Rotate and translate
+                    P_rot = (R * P_base')';
+                    P_rot(:,1) = P_rot(:,1) + x_end;
+                    P_rot(:,2) = P_rot(:,2) + y_end;
+                    
+                    fill(P_rot(:,1), P_rot(:,2), col, 'EdgeColor', 'none');
+                end
+                
+                % Add text label
+                text(x_end, y_end, lbl, 'VerticalAlignment', valign, 'Color', col);
             end
             
-            % Explicitly set axes limits to our cropped box to present a clean, rectangular view
+            % Explicitly set axes limits
             xlim([X_min, X_max]);
             ylim([-0.5 * norm_OH1, max_y_height + norm_OH1]);
             
