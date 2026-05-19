@@ -786,7 +786,7 @@ classdef twinSystem
             % Note:
             %   The viewing window is dynamically bounded based on the total vertical 
             %   layer height to ensure stable aspect ratios across crystal systems with 
-            %   vastly different shear magnitudes (e.g., cubic vs. hexagonal).
+            %   different shear magnitudes (e.g., cubic vs. hexagonal).
         
             % Ensure default variables are set
             if nargin < 5, plotTwinned = false; end
@@ -982,16 +982,26 @@ classdef twinSystem
                 n1 = plane_of_shear_normal / pos_normal_norm;
                 n2 = current_pos_normal / norm(current_pos_normal);
                 
-                % Determine colors and styles
+                % Extract the LaTeX representations
+                try
+                    k2_tex = twin_structs(i).K2.latexChar('round');
+                    eta2_tex = twin_structs(i).eta2.latexChar('round');
+                catch
+                    % Fallback just in case latexChar fails or isn't available on an older object
+                    k2_tex = char(round(twin_structs(i).K2, 'maxHKL', 100));
+                    eta2_tex = char(round(twin_structs(i).eta2, 'maxHKL', 100));
+                end
+                
+                % Determine colors, styles, and labels
                 if abs(abs(dot(n1, n2)) - 1) < 1e-4
                     col = 'b';
                     ls = '-';
-                    lbl = sprintf(' q=%d, S: %.3f', twin_structs(i).q, twin_structs(i).shear);
+                    lbl = sprintf(' $q=%d$, $S: %.3f$, $K_2: %s$, $\\eta_2: %s$', twin_structs(i).q, twin_structs(i).shear, k2_tex, eta2_tex);
                     valign = 'bottom';
                 else
                     col = 'r';
                     ls = '--';
-                    lbl = sprintf(' q=%d (Diff PoS)', twin_structs(i).q);
+                    lbl = sprintf(' $q=%d$ (Diff PoS)', twin_structs(i).q);
                     valign = 'top';
                 end
                 
@@ -1020,8 +1030,8 @@ classdef twinSystem
                     fill(P_rot(:,1), P_rot(:,2), col, 'EdgeColor', 'none');
                 end
                 
-                % Add text label
-                text(x_end, y_end, lbl, 'VerticalAlignment', valign, 'Color', col);
+                % Add text label using the LaTeX interpreter
+                text(x_end, y_end, lbl, 'VerticalAlignment', valign, 'Color', col, 'Interpreter', 'latex', 'FontSize', 11);
             end
             
             % Explicitly set axes limits
