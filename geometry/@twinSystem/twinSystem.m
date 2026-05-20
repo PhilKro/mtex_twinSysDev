@@ -26,12 +26,21 @@ classdef twinSystem
                 tS.k2 = k2;
                 tS.eta2 = eta2;                
 
-                % Set default twin type
+                % Automatically determine twin type based on rational indices
                 if nargin < 7 || isempty(type)
-                    tS.twinType = 1;
+                    rK1 = tS.k1.isRational;
+                    rK2 = tS.k2.isRational;
+                    
+                    tS.twinType = ones(size(tS.k1)); % Default to Type I (1)
+                    tS.twinType(rK2 & ~rK1) = 2;     % Type II
+                    tS.twinType(rK1 & rK2) = 0;      % Compound
+                    if any(~rK1 & ~rK2)
+                        warning('For some twins both K1 and K2 plane were determined as irrational, thus no twin type could be determined. Defaulted to Type I.')
+                    end
                 else
                     tS.twinType = type;
                 end
+
 
                 % Handle CRSS
                 if nargin >= 6 && ~isempty(CRSS)
@@ -94,10 +103,11 @@ classdef twinSystem
         
 
         function isC = isCompound(tS)
-            % A twin is compound if the plane of shear S is a mirror plane.
-            % The plane of shear S is the cross product of eta1 and k1.
-            S = cross(tS.eta1, tS.k1);
-            isC = S.isMirrorPlane;
+            % % A twin is compound if the plane of shear S is a mirror plane.
+            % % The plane of shear S is the cross product of eta1 and k1.
+            % S  = cross(tS.eta1, tS.k1);
+            % isC = S.isMirrorPlane;
+            isC = eq(tS.twinType, 0);
         end
 
         function misori = parentTwinMisorientation(tS)
@@ -471,12 +481,14 @@ classdef twinSystem
 
     methods (Static = true)
         function tS = byK1eta2(k1, eta2, type)
-            if nargin < 3, type = 1; end
             rotAxis = cross(k1, eta2);
             eta1 = cross(k1, rotAxis);
             k2 = cross(eta2, rotAxis);
-            tS = twinSystem(rotAxis, k1, eta1, k2, eta2, 1, type);
-            
+            if nargin <3
+                tS = twinSystem(rotAxis, k1, eta1, k2, eta2, 1);
+            else 
+                tS = twinSystem(rotAxis, k1, eta1, k2, eta2, 1, type);
+            end
             shearvec = 2 * (tS.k1.normalize - dot(tS.eta2.normalize, tS.k1.normalize).^-1 * tS.eta2.normalize);
             assert(dot(shearvec, tS.eta1, 'noSymmetry') > 0, "Something went wrong in the definition of the twin system: eta1 has the wrong sense. Sense of shear will not be correct")
         end
@@ -1396,7 +1408,7 @@ classdef twinSystem
                 % Filter and commit valid candidates
                 if shearAmp > 1e-4 && shearAmp < 2
                     try
-                        tS = twinSystem.byK1eta2(plane, eta2, 1);
+                        tS = twinSystem.byK1eta2(plane, eta2);
                         
                         plane_twin_objects = [plane_twin_objects; tS]; %#ok<AGROW>
                         twinStruct = struct('K1', plane, 'K2', tS.k2, 'eta1', tS.eta1, 'eta2', eta2, 'shear', shearAmp, 'q', q, 'F', F);
