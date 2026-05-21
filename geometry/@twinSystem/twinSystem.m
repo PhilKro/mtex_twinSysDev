@@ -494,7 +494,7 @@ classdef twinSystem
         end
 
         function tS = byK2eta1(k2, eta1, type)
-            if nargin < 3, type = 1; end
+            if nargin < 3, type = []; end
             latticeIsHex = eq(eta1.CS.lattice, latticeType.hexagonal);
 
             rotAxis = cross(eta1, k2);
@@ -684,7 +684,7 @@ classdef twinSystem
             fprintf('\n');
         end
         
-        function [twin_objects, twin_structs] = calculateTheoreticalTwins(cs, planeOrMaxIndex, qRange, structName)
+        function [twin_objects, twin_structs] = calculateTheoreticalTwins(cs, inputObjOrMaxIndex, qRange, structName, twinTypes)
             %CALCULATETHEORETICALTWINS Generates possible twin systems
             %(normal mode) for a given crystalSymmetry, plane or max hkl
             %and twin index (q). 'FCC' or 'BCC' can be handed over as char.
@@ -695,59 +695,95 @@ classdef twinSystem
             %
             % Inputs
             %   cs                  - crystalSymmetry object defining the lattice symmetry.
-            %   planeOrMaxIndex     - Miller object representing the candidate twin plane (K1) or maximum Miller index.
+            %   inputObjOrMaxIndex  - Miller object representing the candidate twin plane (K1), direction (eta1), or maximum Miller index.
             %   qRange              - Double array defining the range of twin indices to evaluate.
             %   structName          - String defining the lattice type (e.g., 'FCC', 'BCC', 'none') for centering rules.
+            %   twinTypes           - Char/Cell array specifying what to calculate: 'type1', 'type2', or both.
             %
             % Outputs
             %   twin_objects        - Array of initialized twinSystem objects for valid modes.
             %   twin_structs        - Structured array containing the detailed crystallographic 
             %                           elements (K1, K2, eta1, eta2, shear, q, F).
-            % Syntax
-            %   % Calculate for all planes up to a max Miller index
-            %   [twin_objects, twin_structs] = twinSystem.calculateTheoreticalTwins(cs, maxIndex, qRange, structName)
-            %
-            %   % Calculate for a specific plane
-            %   [twin_objects, twin_structs] = twinSystem.calculateTheoreticalTwins(cs, plane, qRange, structName)
 
             if nargin < 4, structName = 'none'; end % Default structure
             if nargin < 3, qRange = 1:4; end % Default qRange
+            
+            % If twinTypes is provided as char/string, convert to cell
+            if nargin >= 5 && (ischar(twinTypes) || isstring(twinTypes))
+                twinTypes = cellstr(twinTypes);
+            end
 
-            G_rec = inv(cs.metricTensor);
             twin_objects = twinSystem.empty;
             twin_structs = struct.empty;
 
-            if isa(planeOrMaxIndex, 'Miller')
-                % --- Single plane input ---
-                plane = planeOrMaxIndex;
-                if plane.CS ~= cs
-                    error('Crystal symmetry of the input plane must match the provided crystal symmetry.');
+            if isa(inputObjOrMaxIndex, 'Miller')
+                inputObj = inputObjOrMaxIndex;
+                if inputObj.CS ~= cs
+                    error('Crystal symmetry of the input object must match the provided crystal symmetry.');
                 end
-                [twin_objects, twin_structs] = twinSystem.calculateForPlane(plane, qRange, structName);
+                
+                isReciprocal = strcmpi(inputObj.dispStyle, 'hkl') || strcmpi(inputObj.dispStyle, 'hkil');
+                isDirect = strcmpi(inputObj.dispStyle, 'uvw') || strcmpi(inputObj.dispStyle, 'UVTW');
 
-            elseif isnumeric(planeOrMaxIndex)
-                % --- Max Miller index input ---
-                maxMillerIndex = planeOrMaxIndex;
+                % If twinTypes is specified, check against what is physically possible
+                if nargin >= 5
+                    forceType1 = any(strcmpi('type1', twinTypes) | strcmpi('Type1', twinTypes));
+                    forceType2 = any(strcmpi('type2', twinTypes) | strcmpi('Type2', twinTypes));
+                    
+                    if isReciprocal && forceType2
+                        warning('Cannot calculate Type 2 twins for an input plane. Only Type 1 will be calculated.');
+                    elseif isDirect && forceType1
+                        warning('Cannot calculate Type 1 twins for an input direction. Only Type 2 will be calculated.');
+                    end
+                end
+
+                if isReciprocal
+                    [twin_objects, twin_structs] = twinSystem.calculateForPlane(inputObj, qRange, structName);
+                elseif isDirect
+                    [twin_objects, twin_structs] = twinSystem.calculateForDirection(inputObj, qRange, structName);
+                else
+                    error('Unrecognized Miller object type.');
+                end
+
+            elseif isnumeric(inputObjOrMaxIndex)
+                maxMillerIndex = inputObjOrMaxIndex;
+                
+                % Default to both types if a max index is passed and twinTypes isn't specified
+                if nargin < 5
+                    twinTypes = {'type1', 'type2'};
+                end
+                
+                calcType1 = any(strcmpi('type1', twinTypes) | strcmpi('Type1', twinTypes));
+                calcType2 = any(strcmpi('type2', twinTypes) | strcmpi('Type2', twinTypes));
                 
                 % Generate grid of indices
                 [H, K, L] = ndgrid(-maxMillerIndex:maxMillerIndex, -maxMillerIndex:maxMillerIndex, -maxMillerIndex:maxMillerIndex);
-                hkls = [H(:), K(:), L(:)];
+                indices = [H(:), K(:), L(:)];
+                indices(all(indices == 0, 2), :) = []; 
                 
-                % Remove the [0 0 0] origin
-                hkls(all(hkls == 0, 2), :) = []; 
-                
-                for i = 1:size(hkls, 1)
-                    plane = Miller(hkls(i,1), hkls(i,2), hkls(i,3), cs, 'hkl');
+                for i = 1:size(indices, 1)
+                    idx = indices(i, :);
                     
-                    [plane_twin_objects, plane_twin_structs] = twinSystem.calculateForPlane(plane, qRange, structName);
+                    if calcType1
+                        plane = Miller(idx(1), idx(2), idx(3), cs, 'hkl');
+                        [plane_twin_objects, plane_twin_structs] = twinSystem.calculateForPlane(plane, qRange, structName);
+                        if ~isempty(plane_twin_objects)
+                            twin_objects = [twin_objects; plane_twin_objects]; %#ok<AGROW>
+                            twin_structs = [twin_structs; plane_twin_structs]; %#ok<AGROW>
+                        end
+                    end
                     
-                    if ~isempty(plane_twin_objects)
-                        twin_objects = [twin_objects; plane_twin_objects]; %#ok<AGROW>
-                        twin_structs = [twin_structs; plane_twin_structs]; %#ok<AGROW>
+                    if calcType2
+                        dir = Miller(idx(1), idx(2), idx(3), cs, 'uvw');
+                        [dir_twin_objects, dir_twin_structs] = twinSystem.calculateForDirection(dir, qRange, structName);
+                        if ~isempty(dir_twin_objects)
+                            twin_objects = [twin_objects; dir_twin_objects]; %#ok<AGROW>
+                            twin_structs = [twin_structs; dir_twin_structs]; %#ok<AGROW>
+                        end
                     end
                 end
             else
-                error('Second argument must be a Miller object (for a single plane) or a numeric value (for max Miller index).');
+                error('Second argument must be a Miller object (for a single plane/direction) or a numeric value (for max Miller index).');
             end
         end
 
@@ -1140,6 +1176,46 @@ classdef twinSystem
                 V = Miller(0, 1, 0, CS, 'uvw');
             end
         end
+
+        function [OZ1, H, K] = Bezout3DRec(dir)
+            % BEZOUT3DREC Solves the 3D linear Diophantine equation for a crystallographic direction.
+            %
+            % Syntax
+            %   [OZ1, H, K] = twinSystem.Bezout3DRec(dir)
+            %
+            % Description
+            %   Applies the Extended Euclidean Algorithm to a direction's Miller indices (uvw)
+            %   to calculate three physical, integer-based reciprocal lattice vectors.
+            %
+            % Outputs
+            %   OZ1 - Reciprocal lattice vector connecting the origin to an atom on the
+            %         first adjacent layer perpendicular to the direction.
+            %   H   - First primitive reciprocal lattice vector lying exactly perpendicular to dir.
+            %   K   - Second primitive reciprocal lattice vector lying exactly perpendicular to dir,
+            %         linearly independent from H.
+            uvw = round(dir.uvw);
+            u = uvw(1); v = uvw(2); w = uvw(3);
+            CS = dir.CS;
+            
+            % Extended Euclidean Algorithm
+            [g, a, b] = gcd(u, v);
+            [G, c, d] = gcd(g, w);
+            
+            h = c * a;
+            k = c * b;
+            l = d;
+            
+            OZ1 = Miller(h, k, l, CS, 'hkl');
+            
+            if g ~= 0
+                H = Miller(v/g, -u/g, 0, CS, 'hkl');
+                K = Miller(a*w/G, b*w/G, -g/G, CS, 'hkl');
+            else
+                % If u=0 and v=0, then the direction is (0,0,w)
+                H = Miller(1, 0, 0, CS, 'hkl');
+                K = Miller(0, 1, 0, CS, 'hkl');
+            end
+        end
         
         %% --- BASIS VECTOR MINIMIZATION ---
         
@@ -1286,62 +1362,124 @@ classdef twinSystem
             %   plane_twin_structs - Structured array containing the detailed crystallographic 
             %                        elements (K1, K2, eta1, eta2, shear, q, F).
 
+            [plane_twin_objects, plane_twin_structs] = twinSystem.calculateTheoreticalMode(plane, qRange, structName, 'Type I');
+        end
 
-            plane_twin_objects = twinSystem.empty; % Initialize empty twinSystem array
-            plane_twin_structs = struct.empty;     % Initialize empty struct array
+        function [dir_twin_objects, dir_twin_structs] = calculateForDirection(dir, qRange, structName)
+            % CALCULATEFORDIRECTION Determines the lowest shear normal twinning modes for a given direction and range of twin indeces (qRange).
+            %
+            % Acknowledgement:
+            %   The logic and algorithms in this method are translated and adapted 
+            %   from the ARPGE, GenOVa, and Crystals programs developed by Cyril Cayron.
+            % Syntax
+            %   [dir_twin_objects, dir_twin_structs] = twinSystem.calculateForDirection(dir, qRange, structName)
+            %
+            % Description
+            %   Evaluates a candidate twin direction (eta1) to find viable conjugate twin planes 
+            %   (K2) up to a maximum twin index (q). By using the physical 
+            %   lattice node closest to the geometric normal on the q-th layer in reciprocal space, 
+            %   this function isolates "normal modes" as defined by C. Cayron. 
+            %   https://www.mdpi.com/2075-4701/10/2/231
+            %
+            % Inputs
+            %   dir        - Miller object representing the candidate twin direction (eta1).
+            %   qRange     - Double array defining the range of twin indices to evaluate.
+            %   structName - String defining the lattice type (e.g., 'FCC', 'BCC', 'none') for centering rules.
+            %
+            % Outputs
+            %   dir_twin_objects - Array of initialized twinSystem objects for valid modes.
+            %   dir_twin_structs - Structured array containing the detailed crystallographic 
+            %                      elements (K1, K2, eta1, eta2, shear, q, F).
+
+            [dir_twin_objects, dir_twin_structs] = twinSystem.calculateTheoreticalMode(dir, qRange, structName, 'Type II');
+        end
+
+        function [twin_objects, twin_structs] = calculateTheoreticalMode(inputObj, qRange, structName, type)
+            % Generic method to compute theoretical modes for both direct and reciprocal spaces.
             
-            vals = [plane.h, plane.k, plane.l];
-            cs = plane.CS;
+            twin_objects = twinSystem.empty; % Initialize empty twinSystem array
+            twin_structs = struct.empty;     % Initialize empty struct array
+            
+            cs = inputObj.CS;
+            isTypeI = strcmpi(type, 'Type I') || strcmpi(type, 'Type1') || strcmpi(type, 'type1');
+            
+            if isTypeI
+                vals = [inputObj.h, inputObj.k, inputObj.l];
+            else
+                vals = [inputObj.u, inputObj.v, inputObj.w];
+            end
+
             % Correct for floating point issues but throw error if any value is more than 1e-10 away from an integer
             if any(mod(vals, 1) > 1e-10 & mod(vals, 1) < (1 - 1e-10))
                 error('Inputs must be integers (floating point noise excepted).');
             end
 
-            h = round(plane.h); k = round(plane.k); l = round(plane.l);
-            g = gcd(gcd(h, k), l);
+            v1 = round(vals(1)); v2 = round(vals(2)); v3 = round(vals(3));
+            g = gcd(gcd(v1, v2), v3);
             
-            % Enforce primitive plane checks 
+            % Enforce primitive plane/direction checks 
             if g > 2; return; end
             
             % Apply selection rules
-            if strcmpi(structName, 'FCC') && g == 1 && ~twinSystem.is_FCC_Rec(plane)
-                return;
-            elseif strcmpi(structName, 'BCC') && g == 1 && ~twinSystem.is_BCC_Rec(plane)
-                return;
-            elseif strcmpi(structName, 'none') && g > 1
-                return;
+            if isTypeI
+                if strcmpi(structName, 'FCC') && g == 1 && ~twinSystem.is_FCC_Rec(inputObj); return; end
+                if strcmpi(structName, 'BCC') && g == 1 && ~twinSystem.is_BCC_Rec(inputObj); return; end
+            else
+                if strcmpi(structName, 'FCC') && g == 1 && ~twinSystem.is_FCC_Dir(inputObj); return; end
+                if strcmpi(structName, 'BCC') && g == 1 && ~twinSystem.is_BCC_Dir(inputObj); return; end
+            end
+            if strcmpi(structName, 'none') && g > 1; return; end
+            
+            ap = [v1; v2; v3];
+            
+            if isTypeI
+                G_metric = inv(cs.metricTensor); % G_rec
+            else
+                G_metric = cs.metricTensor;      % G_dir
             end
             
-            % Normal to plane in direct space (Crystal coordinates)
-            ap = [h; k; l];
-
-            G_rec = inv(cs.metricTensor);
-            apD = G_rec * ap;
-            % apD should be equivalent to plane.uvw
-            dhkl2 = 1 / (ap' * apD);
-            % OH1_vec perpendicular to plane and length dhkl
-            OH1_vec = dhkl2 * apD;
+            apD = G_metric * ap;
+            d_sq = 1 / (ap' * apD);
+            OH1_vec = d_sq * apD;
             
             % Solve the Diophantine equation to build valid basis vectors
-            if g == 1
-                [OZ1, U, V] = twinSystem.Bezout3D(plane);
-                [~, U, V] = twinSystem.findUV(0.5*U, 0.5*V, structName);
-            elseif g == 2
-                plane_half = Miller(h/2, k/2, l/2, cs, 'hkl');
-                [OZ1, U, V] = twinSystem.Bezout3D(plane_half);
-                [oz2, U, V] = twinSystem.findUV(0.5*U, 0.5*V, structName);
-                OZ1 = Miller(0.5 * OZ1.u, 0.5 * OZ1.v, 0.5 * OZ1.w, cs, 'uvw');
-                
-                if strcmpi(structName, 'FCC') && ~twinSystem.is_FCC_Dir(OZ1)
-                    OZ1 = OZ1 + oz2;
-                elseif strcmpi(structName, 'BCC') && ~twinSystem.is_BCC_Dir(OZ1)
-                    OZ1 = OZ1 + oz2;
+            if isTypeI
+                if g == 1
+                    [OZ1, U, V] = twinSystem.Bezout3D(inputObj);
+                    [~, U, V] = twinSystem.findUV(0.5*U, 0.5*V, structName);
+                else
+                    input_half = Miller(v1/2, v2/2, v3/2, cs, 'hkl');
+                    [OZ1, U, V] = twinSystem.Bezout3D(input_half);
+                    [oz2, U, V] = twinSystem.findUV(0.5*U, 0.5*V, structName);
+                    OZ1 = Miller(0.5 * OZ1.u, 0.5 * OZ1.v, 0.5 * OZ1.w, cs, 'uvw');
+                    
+                    if strcmpi(structName, 'FCC') && ~twinSystem.is_FCC_Dir(OZ1)
+                        OZ1 = OZ1 + oz2;
+                    elseif strcmpi(structName, 'BCC') && ~twinSystem.is_BCC_Dir(OZ1)
+                        OZ1 = OZ1 + oz2;
+                    end
                 end
-            else % g == 0, which is the (000) plane, already filtered out, but for safety
-                return;
+                BasisUV = [U.uvw', V.uvw'];
+                OZ1_vec = OZ1.uvw';
+            else
+                if g == 1
+                    [OZ1, U, V] = twinSystem.Bezout3DRec(inputObj);
+                    [~, U, V] = twinSystem.findHK(0.5*U, 0.5*V, structName);
+                else
+                    input_half = Miller(v1/2, v2/2, v3/2, cs, 'uvw');
+                    [OZ1, U, V] = twinSystem.Bezout3DRec(input_half);
+                    [oz2, U, V] = twinSystem.findHK(0.5*U, 0.5*V, structName);
+                    OZ1 = Miller(0.5 * OZ1.h, 0.5 * OZ1.k, 0.5 * OZ1.l, cs, 'hkl');
+                    
+                    if strcmpi(structName, 'FCC') && ~twinSystem.is_FCC_Rec(OZ1)
+                        OZ1 = OZ1 + oz2;
+                    elseif strcmpi(structName, 'BCC') && ~twinSystem.is_BCC_Rec(OZ1)
+                        OZ1 = OZ1 + oz2;
+                    end
+                end
+                BasisUV = [U.hkl', V.hkl'];
+                OZ1_vec = OZ1.hkl';
             end
-            
-            BasisUV = [U.uvw', V.uvw'];
             
             % Iterate through rational shear offsets
             for q = qRange
@@ -1353,7 +1491,7 @@ classdef twinSystem
                 % We stretch the single-layer physical atomic step (OZ1) by q.
                 % This lands on an atom on the q-th plane, but because it stepped diagonally, 
                 % it is not necessarily the closest atom to the perfect normal (OH).
-                OZ = q * OZ1.uvw';
+                OZ = q * OZ1_vec;
                 
                 % ZH points from our reference atom (OZ) to the geometric normal (OH).
                 % Lies flat on the twin plane
@@ -1370,7 +1508,11 @@ classdef twinSystem
                 
                 % ZA is the 3D vector representing the flat physical translation along the twin plane 
                 % from our reference atom (OZ) to the closest real atom.
-                ZA = nU * U.uvw' + nV * V.uvw';
+                if isTypeI
+                    ZA = nU * U.uvw' + nV * V.uvw';
+                else
+                    ZA = nU * U.hkl' + nV * V.hkl';
+                end
                 
                 % Add the adjustment walk (ZA) to our initial reference atom (OZ).
                 % OA is now the true vector from the origin to the closest physical atom on the q-th plane.
@@ -1391,28 +1533,52 @@ classdef twinSystem
                     continue;
                 end
                     
-                eta2 = Miller(eta2_vec(1), eta2_vec(2), eta2_vec(3), cs, 'uvw');
+                if isTypeI
+                    vec2 = Miller(eta2_vec(1), eta2_vec(2), eta2_vec(3), cs, 'uvw');
+                else
+                    vec2 = Miller(eta2_vec(1), eta2_vec(2), eta2_vec(3), cs, 'hkl');
+                end
                     
                 % Build distortion matrix explicitly in lattice space
                
-                BpOP = [U.uvw', V.uvw', OI];
-                BpOPd = [U.uvw', V.uvw', OA];
+                if isTypeI
+                    BpOP = [U.uvw', V.uvw', OI];
+                    BpOPd = [U.uvw', V.uvw', OA];
+                else
+                    BpOP = [U.hkl', V.hkl', OI];
+                    BpOPd = [U.hkl', V.hkl', OA];
+                end
                 
                 if abs(det(BpOP)) < 1e-6
                     continue;
                 end
                     
-                F = BpOPd / BpOP;
+                F_inner = BpOPd / BpOP;
+                
+                if isTypeI
+                    F = F_inner;
+                else
+                    F = inv(F_inner)';
+                end
+                
                 shearAmp = twinSystem.ShearMyFormula(F, cs);
                 
                 % Filter and commit valid candidates
                 if shearAmp > 1e-4 && shearAmp < 2
                     try
-                        tS = twinSystem.byK1eta2(plane, eta2);
+                        if isTypeI
+                            tS = twinSystem.byK1eta2(inputObj, vec2);
+                        else
+                            tS = twinSystem.byK2eta1(vec2, inputObj);
+                        end
                         
-                        plane_twin_objects = [plane_twin_objects; tS]; %#ok<AGROW>
-                        twinStruct = struct('K1', plane, 'K2', tS.k2, 'eta1', tS.eta1, 'eta2', eta2, 'shear', shearAmp, 'q', q, 'F', F);
-                        plane_twin_structs = [plane_twin_structs; twinStruct]; %#ok<AGROW>
+                        twin_objects = [twin_objects; tS]; %#ok<AGROW>
+                        if isTypeI
+                            twinStruct = struct('K1', inputObj, 'K2', tS.k2, 'eta1', tS.eta1, 'eta2', vec2, 'shear', shearAmp, 'q', q, 'F', F);
+                        else
+                            twinStruct = struct('K1', tS.k1, 'K2', vec2, 'eta1', inputObj, 'eta2', tS.eta2, 'shear', shearAmp, 'q', q, 'F', F);
+                        end
+                        twin_structs = [twin_structs; twinStruct]; %#ok<AGROW>
                     catch
                         % Skip if eta2 points directly along the plane nullifying shear
                         continue;
