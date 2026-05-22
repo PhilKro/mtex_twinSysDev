@@ -641,7 +641,7 @@ classdef twinSystem
             end
         end
 
-        function tS = fcc_111_111(CS)
+        function tS = fcc_111(CS)
             % classic fcc {111}<112> twin system
             if eq(CS.lattice, latticeType.cubic)
                 tS = twinSystem.calculateTheoreticalTwins(CS, Miller(1,1,1,CS,'hkl'), 2, 'FCC');
@@ -651,7 +651,7 @@ classdef twinSystem
             end
         end
 
-        function tS = bcc_112_112(CS)
+        function tS = bcc_112(CS)
             % classic bcc {112}<111> twin system
             if eq(CS.lattice, latticeType.cubic)
                 tS = twinSystem.calculateTheoreticalTwins(CS, Miller(1,1,2,CS,'hkl'), 2, 'BCC');
@@ -1600,8 +1600,15 @@ classdef twinSystem
                         try
                             if isTypeI
                                 tS = twinSystem.byK1eta2(inputObj, vec2);
+                                rot = orientation.byAxisAngle(tS.k1, pi);
                             else
                                 tS = twinSystem.byK2eta1(vec2, inputObj);
+                                rot = orientation.byAxisAngle(tS.eta1, pi);
+                            end
+                            
+                            % Skip if the twin misorientation is a trivial symmetry operator
+                            if angle(rot) < 1e-4
+                                continue;
                             end
                             
                             twin_objects_cell{end+1} = tS; %#ok<AGROW>
