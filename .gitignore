@@ -81,6 +81,8 @@ gitTricks.md
 *.zip
 *.lyx
 *.odg
+*.tex
+*.xml
 
 # 9. OS Generated Files
 .DS_Store

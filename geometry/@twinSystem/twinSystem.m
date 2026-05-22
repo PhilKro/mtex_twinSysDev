@@ -452,7 +452,12 @@ classdef twinSystem
         % end
 
         function varargout = size(tS,varargin)
-            [varargout{1:nargout}] = size(tS.k1,varargin{:});
+        % overloads size
+            if builtin('numel', tS) == 0
+                [varargout{1:nargout}] = builtin('size', tS, varargin{:});
+            else
+                [varargout{1:nargout}] = size(tS.eta1.x, varargin{:});
+            end
         end
 
         function l = eq(tS1,tS2)
@@ -565,49 +570,46 @@ classdef twinSystem
             end
         end
 
-        function tS = hexagonal_1012_1012(CS)
+        function tS = hexagonal_1012(CS)
             if CS.lattice.isTriHex
-                tS = twinSystem.byK2eta1(Miller(-1, 0, 1, 2, CS), Miller(-1, 0, 1, 1, CS, 'UVTW'), 1);
+                % tS = twinSystem.byK2eta1(Miller(-1, 0, 1, 2, CS), Miller(-1, 0, 1, 1, CS, 'UVTW'), 1);
+                tS = twinSystem.calculateTheoreticalTwins(CS,Miller(1,0,-1,2,CS),2);
             else
                 disp("Provide a hexagonal CS for this method")
             end
         end
 
-        function tS = hexagonal_1122_0001(CS)
+        function tS = hexagonal_1101(CS)
             if CS.lattice.isTriHex
-                tS = twinSystem.byK2eta1(Miller(0, 0, 0, 1, CS), Miller(-1, -1, 2, 3, CS, 'UVTW'), 1);
+                % tS = twinSystem.byK2eta1(Miller(1, 0, -1, -3, CS), Miller(1, 0, -1, -2, CS, 'UVTW'), 1);
+                tS = twinSystem.calculateTheoreticalTwins(CS,Miller(1,0,-1,1,CS),4);
             else
                 disp("Provide a hexagonal CS for this method")
             end
         end
 
-        function tS = hexagonal_1101_1013(CS)
+        function tS = hexagonal_1122(CS)
             if CS.lattice.isTriHex
-                tS = twinSystem.byK2eta1(Miller(1, 0, -1, -3, CS), Miller(1, 0, -1, -2, CS, 'UVTW'), 1);
-            else
-                disp("Provide a hexagonal CS for this method")
-            end
-        end
-
-        function tS = hexagonal_1122_1124(CS)
-            if CS.lattice.isTriHex
-                tS = twinSystem.byK2eta1(Miller(1, 1, -2, -4, CS), Miller(1, 1, -2, -3, CS, 'UVTW'), 1);
+                % tS = twinSystem.byK2eta1(Miller(1, 1, -2, -4, CS), Miller(1, 1, -2, -3, CS, 'UVTW'), 1);
+                tS = twinSystem.calculateTheoreticalTwins(CS,Miller(1,1,-2,2,CS),3);
             else
                 disp("Provide a hexagonal CS for this method")
             end
         end
         
-        function tS = hexagonal_1124_1122(CS)
+        function tS = hexagonal_1124(CS)
             if CS.lattice.isTriHex
-                tS = twinSystem.byK2eta1(Miller(1, 1, -2, -2, CS), Miller(2, 2, -4, -3, CS, 'UVTW'), 1);
+                % tS = twinSystem.byK2eta1(Miller(1, 1, -2, -2, CS), Miller(2, 2, -4, -3, CS, 'UVTW'), 1);
+                tS = twinSystem.calculateTheoreticalTwins(CS,Miller(1,1,-2,4,CS),3);
             else
                 disp("Provide a hexagonal CS for this method")
             end
         end
 
-        function tS = hexagonal_1121_0001(CS)
+        function tS = hexagonal_1121(CS)
             if CS.lattice.isTriHex
-                tS = twinSystem.byK2eta1(Miller(0, 0, 0, 1, CS), Miller(-1, -1, 2, 6, CS, 'UVTW'), 1);
+                %tS = twinSystem.byK2eta1(Miller(0, 0, 0, 1, CS), Miller(-1, -1, 2, 6, CS, 'UVTW'), 1);
+                tS = twinSystem.calculateTheoreticalTwins(CS,Miller(1,1,-2,1,CS),1);
             else
                 disp("Provide a hexagonal CS for this method")
             end
