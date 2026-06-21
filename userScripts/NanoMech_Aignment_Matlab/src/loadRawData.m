@@ -20,6 +20,9 @@ end
 % loop over data
 for i=ind    
     DataName = rawData.dataNames{i};
+    if eq(string(DataName),"dataNames")
+        continue
+    end
     % switch between types of data (EBSD or SEM for now)
     switch rawData.(DataName).dtype
         case 'EBSD'

@@ -144,43 +144,64 @@ for i = 1:N
     loaded_data = load([fnames{i}, '_MTEX6.1.mat']);
     % loaded_data = load(fnames{i});
     ebsd{i}   = loaded_data.newEBSD;
+    if isfield(ebsd{i}.prop, 'specimen_mask_params')
+        ebsd{i}.prop = rmfield(ebsd{i}.prop, 'specimen_mask_params');
+    end
     reforientation = orientation.byEuler(0*degree,0*degree,0*degree, ebsd{i}.CS);
     ebsd{i}.orientations = ebsd{i}.orientations.project2FundamentalRegion(reforientation);
     
-    
-    % --- Load better specimen mask from original .ang file using oldId ---
-    ang_base = '';
-    if contains(fnames{i}, 'inc_0'), ang_base = 'Re_7deg_insitu Specimen 1 0 Map Data 1_BW158';
-    elseif contains(fnames{i}, 'inc_4'), ang_base = 'Re_7deg_insitu Specimen 1 4 Map Data 2_BW158';
-    elseif contains(fnames{i}, 'inc_6'), ang_base = 'Re_7deg_insitu Specimen 1 6 Map Data 7_BW158';
-    elseif contains(fnames{i}, 'inc_7'), ang_base = 'Re_7deg_insitu Specimen 1 7 Map Data 9_BW158';
-    elseif contains(fnames{i}, 'inc_8'), ang_base = 'Re_7deg_insitu Specimen 1 8 Map Data 11_BW158';
+    if isfield(ebsd{i}.prop, 'specimenlocation')
+        ebsd{i}(~ebsd{i}.prop.specimenlocation) = 'notIndexed';
+        
+        numPix = (4*1.5)^2;
+        
+        ebsd{i} = ebsd{i}.gridify; % Force MTEX to treat this as a grid to avoid jcvoronoi
+        [grains{i}, ebsd{i}.grainId] = calcGrains(ebsd{i}, 'angle', 15*degree, 'minPixel', numPix);
+        grains{i}.meanOrientation = grains{i}.meanOrientation.project2FundamentalRegion(reforientation);
+    else
+        grains{i} = loaded_data.grains;
+        warning('Specimen mask %s not found. Proceeding with loaded grains.', mask_file);
     end
-    
+
+    % --- Load better specimen mask from original .ang file using oldId ---
+    % DOESNT WORK BECAUSE oldId DOESNT POINT TO THE SIZE OF THE ANG DATA
+    % ANYMORE
+    % ang_base = '';
+    % if contains(fnames{i}, 'inc_0'), ang_base = 'Re_7deg_insitu Specimen 1 0 Map Data 1_BW158';
+    % elseif contains(fnames{i}, 'inc_4'), ang_base = 'Re_7deg_insitu Specimen 1 4 Map Data 2_BW158';
+    % elseif contains(fnames{i}, 'inc_6'), ang_base = 'Re_7deg_insitu Specimen 1 6 Map Data 7_BW158';
+    % elseif contains(fnames{i}, 'inc_7'), ang_base = 'Re_7deg_insitu Specimen 1 7 Map Data 9_BW158';
+    % elseif contains(fnames{i}, 'inc_8'), ang_base = 'Re_7deg_insitu Specimen 1 8 Map Data 11_BW158';
+    % end
+    % 
     % mask_file = fullfile(inputPath, 'EBSD_angs', [ang_base, '_specimen_mask.mat']);
     % if exist(mask_file, 'file')
     %     mask_data = load(mask_file, 'specimenlocation');
     %     if isfield(ebsd{i}.prop, 'oldId')
-    %         old_id = ebsd{i}.prop.oldId;
+    %         old_id = round(ebsd{i}.prop.oldId);
+    %         valid_id = ~isnan(old_id) & old_id > 0 & old_id <= length(mask_data.specimenlocation);
+    %         mask_aligned = false(size(old_id));
+    %         mask_aligned(valid_id) = mask_data.specimenlocation(old_id(valid_id));
+    %         ebsd{i}(~mask_aligned) = 'notIndexed';
+    %     elseif isfield(ebsd{i}.prop, 'originalId')
+    %         old_id = round(ebsd{i}.prop.originalId);
     %         valid_id = ~isnan(old_id) & old_id > 0 & old_id <= length(mask_data.specimenlocation);
     %         mask_aligned = false(size(old_id));
     %         mask_aligned(valid_id) = mask_data.specimenlocation(old_id(valid_id));
     %         ebsd{i}(~mask_aligned) = 'notIndexed';
     %     else
-    %         warning('oldId property not found in aligned EBSD data for %s. Falling back to old mask.', fnames{i});
-    %         ebsd{i}(~ebsd{i}.prop.specimenlocation) = 'notIndexed';
+    %         warning('Could not find oldId or originalId to apply the specimen mask for %s', fnames{i});
     %     end
+    % 
+    %     numPix = (4*1.5)^2;
+    % 
+    %     ebsd{i} = ebsd{i}.gridify; % Force MTEX to treat this as a grid to avoid jcvoronoi
+    %     [grains{i}, ebsd{i}.grainId] = calcGrains(ebsd{i}, 'angle', 15*degree, 'minPixel', numPix);
+    %     grains{i}.meanOrientation = grains{i}.meanOrientation.project2FundamentalRegion(reforientation);
     % else
-    %     warning('Specimen mask file not found: %s. Falling back to old mask.', mask_file);
-    %     ebsd{i}(~ebsd{i}.prop.specimenlocation) = 'notIndexed';
+    %     grains{i} = loaded_data.grains;
+    %     warning('Specimen mask %s not found. Proceeding with loaded grains.', mask_file);
     % end
-    % ----
-    % possible grain calc
-    % num pixel, adjust for small stepsize due to alignment
-    % numPix = (4*1.5)^2;
-    % [grains{i}, ebsd{i}.grainId] = calcGrains(ebsd{i},'alpha',3,'angle',15*degree,'minPixel',numPix);
-    % ----
-    grains{i} = loaded_data.grains;
     % ----
     
     area{i}   = loaded_data.area;
@@ -249,7 +270,7 @@ clear data
 %% plot overlap straincomps
 
 lineWidth = 2;
-lineColor = 'w';
+lineColor = [1.0000, 0.0000, 1.0000]; %'k';
 strainthresh = 1;
 strainComp = {'exx2','exy2','eyy2'};
 % figure;
@@ -298,10 +319,6 @@ end
 
 %% plot eyy
 
-lineWidth = 2;
-lineColor = 'w';
-strainthresh = 1;
-
 % figure;
 % newMtexFigure('layout',[1 N-1])
 for i=2:N
@@ -336,9 +353,7 @@ end
 
 %% plot effective shear strain (geff)
 
-lineWidth = 2;
-lineColor = 'w';
-strainthresh = 1;
+lineColor = [1.0000, 0.5000, 0.0000];
 
 % The specimen mask is already loaded and applied during the Quick Load section 
 % via ebsd{i}(~ebsd{i}.prop.specimenlocation) = 'notIndexed';
@@ -369,5 +384,7 @@ for i=2:N
     caxis([0 0.4]) % Adjust upper limit for geff if necessary
     mtexColorMap("viridis")
     mtexColorbar('title', 'Effective Shear Strain')
+    axis off
     saveFigure(fullfile(outputPath,['inc_',num2str(i),'_geff_alignedNewFilt_Filt',num2str(filterSize),'.png']))
+    close all
 end

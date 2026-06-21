@@ -64,6 +64,7 @@ classdef dynProp
         if size(dp.prop.(fn{i}),2)>1 && length(dp) == size(dp.prop.(fn{i}),1)
           dp.prop.(fn{i}) = dp.prop.(fn{i})(ind,:);
         else
+          fn{i}
           dp.prop.(fn{i}) = dp.prop.(fn{i})(ind);
         end
       end

@@ -21,13 +21,13 @@ plottingConvention.default.outOfScreen = -zvector;
 % --- Analysis Parameters ---
 % Define the range of tilt corrections to test (in degrees)
 % This will be applied as an additional rotation around the x-axis.
-tilt_series = -10:5:10; 
+tilt_series = 0:1:5; 
 
 % Primary variants to consider in the analysis
 pVars = 1:6;
 
 % Cutoff criteria for identifying a valid twin pixel
-magCutoff = 0.22; 
+magCutoff = 0.21; 
 shapeCutoff = 0.5; 
 
 % --- Data and Paths ---
@@ -53,7 +53,17 @@ for i = 1:N
     reforientation = orientation.byEuler(0*degree,0*degree,0*degree, ebsd{i}.CS);
     ebsd{i}.orientations = ebsd{i}.orientations.project2FundamentalRegion(reforientation);
 
-    grains{i} = loaded_data.grains;
+    if isfield(ebsd{i}.prop, 'specimenlocation')
+        ebsd{i}(~ebsd{i}.prop.specimenlocation) = 'notIndexed';
+        
+        numPix = (4*1.5)^2;
+        ebsd{i} = ebsd{i}.gridify; % Force MTEX to treat this as a grid to avoid jcvoronoi
+        [grains{i}, ebsd{i}.grainId] = calcGrains(ebsd{i}, 'angle', 15*degree, 'minPixel', numPix);
+        grains{i}.meanOrientation = grains{i}.meanOrientation.project2FundamentalRegion(reforientation);
+    else
+        warning('specimenlocation not found in ebsd properties for %s. Defaulting to original grain data.', fnames{i});
+        grains{i} = loaded_data.grains;
+    end
     area{i}   = loaded_data.area;
 end
 % ---------------------------------
@@ -114,6 +124,9 @@ end
 colors = lines(numel(pVars));
 
 %% 3. Tilt Sensitivity Loop
+linewidth_gB = 3;
+linecolor_gB = 'k';
+
 fprintf('\n--- Starting Tilt Sensitivity Analysis ---\n');
 
 for tilt_correction_deg = tilt_series
@@ -178,6 +191,9 @@ for tilt_correction_deg = tilt_series
     
     fig1 = figure('Visible', 'off');
     plot(ebsd{inc}, plotColor);
+    hold on;
+    plot(grains{inc}.boundary, 'linewidth', linewidth_gB, 'linecolor', linecolor_gB);
+    hold off;
     title(sprintf('Best Fit Variant (Tilt: %+d°)', tilt_correction_deg));
     colormap(colors);
     caxis([1 numel(pVars)]);
@@ -189,6 +205,9 @@ for tilt_correction_deg = tilt_series
     % Plot 2: Scalar Projection Factor 'x' Map
     fig2 = figure('Visible', 'off');
     plot(ebsd{inc}, bestMagnitudeX);
+    hold on;
+    plot(grains{inc}.boundary, 'linewidth', linewidth_gB, 'linecolor', linecolor_gB);
+    hold off;
     title(sprintf('Scalar Projection Factor ''x'' (Tilt: %+d°)', tilt_correction_deg));
     colormap turbo;
     setColorRange([0.2, 1.35]);
@@ -200,6 +219,9 @@ for tilt_correction_deg = tilt_series
     % Plot 3: Shape Mismatch Map
     fig3 = figure('Visible', 'off');
     plot(ebsd{inc}, minMismatch);
+    hold on;
+    plot(grains{inc}.boundary, 'linewidth', linewidth_gB, 'linecolor', linecolor_gB);
+    hold off;
     title(sprintf('Shape Mismatch of Best Fit (Tilt: %+d°)', tilt_correction_deg));
     colormap(viridis);
     setColorRange([0, shapeCutoff]);

@@ -200,15 +200,17 @@ end
 if isfield(options, 'case')
     if ~isfield(options,'in_situIncrementName')
             Filename_temp_save = sprintf('Selection_Points_Backup_%s_%s', options.case, datestr(now,'mm-dd-yyyy_HH-MM') );
+    else
+        Filename_temp_save = [options.in_situIncrementName,'_Selection_Points_Backup_%s', options.case];
     end
-    Filename_temp_save = [options.in_situIncrementName,'_Selection_Points_Backup_%s', options.case];
 else
     if ~isfield(options,'in_situIncrementName')
             Filename_temp_save = sprintf('Selection_Points_Backup_%s', datestr(now,'mm-dd-yyyy_HH-MM') );
-    end
-    Filename_temp_save = [options.in_situIncrementName,'Selection_Points_Backup'];
-end
+    else
+        Filename_temp_save = [options.in_situIncrementName,'Selection_Points_Backup'];
 
+    end
+end
 
 
 %%% plot the required maps and initial selection points, if any %%%

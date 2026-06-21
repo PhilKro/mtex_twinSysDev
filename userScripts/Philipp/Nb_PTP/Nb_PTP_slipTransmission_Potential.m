@@ -326,7 +326,6 @@ for i_analysis = 1:length(analyses)
     grid on;
 
     % Define colors and markers for source systems
-    source_colors = lines(num_sg_systems);  % Use MATLAB's lines colormap for distinct colors
     source_markers = {'o', 's', 'd', '^', 'v', '>', '<'};  % Cycle through markers if more than 7 sources
     if num_sg_systems > length(source_markers)
         source_markers = repmat(source_markers, 1, ceil(num_sg_systems / length(source_markers)));
@@ -349,16 +348,27 @@ for i_analysis = 1:length(analyses)
             m_prime_s = abs(cos(angle(b_eff_k, sS_tg_current.b, 'noSymmetry')) * ...
                 cos(angle(sS_k.n, sS_tg_current.n, 'noSymmetry')));
             
-            h = scatter(m_prime_s, sf, 100, source_markers{s}, ...
-                'MarkerFaceColor', source_colors(s, :), ...
-                'MarkerEdgeColor', 'k', 'LineWidth', 1.0);
+            % Calculate residual Burgers vector magnitude
+            % We consider both +/- directions of the target Burgers vector and take the minimum mismatch
+            res_b_mag = min(norm(b_eff_k - sS_tg_current.b), norm(b_eff_k + sS_tg_current.b));
+            
+            h = scatter(m_prime_s, sf, 100, res_b_mag, source_markers{s}, ...
+                'filled', 'MarkerEdgeColor', 'k', 'LineWidth', 1.0);
             
             if k == 1  % Collect handles only once per source
-                legend_handles = [legend_handles, h];
+                % Create a dummy scatter plot for the legend (gray face) to avoid color confusion
+                h_dummy = scatter(NaN, NaN, 100, [0.5 0.5 0.5], source_markers{s}, ...
+                    'filled', 'MarkerEdgeColor', 'k', 'LineWidth', 1.0);
+                legend_handles = [legend_handles, h_dummy];
                 legend_labels = [legend_labels, sprintf('Source Sys %d', sg_ss_idx(s))];
             end
         end
     end
+
+    % Apply viridis colormap and colorbar for residual Burgers vector magnitude
+    mtexColorMap viridis;
+    cb = colorbar;
+    ylabel(cb, 'Residual Burgers Vector Mag. |\Delta b|');
 
     % Add legend
     if ~isempty(legend_handles)

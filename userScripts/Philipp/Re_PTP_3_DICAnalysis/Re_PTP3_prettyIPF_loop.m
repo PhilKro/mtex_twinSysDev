@@ -124,6 +124,97 @@ for i = 1:length(angFiles)
     close(fig);
     
     fprintf('  -> Saved plot to %s\n', out_name);
+    
+    % --- Twin Variant Identification ---
+    % Project orientations to Fundamental Region
+    reforientation = orientation.byEuler(0*degree, 0*degree, 0*degree, CS);
+    ebsd.orientations = ebsd.orientations.project2FundamentalRegion(reforientation);
+    
+    % Reconstruct Grains
+    [grains, ebsd.grainId] = calcGrains(ebsd, 'angle', 5*degree, 'minPixel', 5);
+    [grains, ebsd.grainId] = calcGrains(ebsd, 'angle', 5*degree, 'minPixel', 5);
+    % grains = smooth(grains, 5);
+
+    % Identify Parent Grain & Twin Systems
+    [~, parentId] = max(grains.numPixel);
+    parentGrain = grains(parentId);
+    parentGrains = grains(angle(parentGrain.meanOrientation, grains.meanOrientation) < 8*degree);
+
+    tS_1121 = twinSystem.hexagonal_1121_0001(CS);
+    tS_sym = tS_1121.symmetrise;
+
+    % Calculate primary and secondary variants
+    primaryTwin = parentGrain.meanOrientation * tS_sym;
+    secondTwin = primaryTwin * tS_sym;
+
+    primary_twin_oris = primaryTwin.orientation;
+    secondary_twin_oris = secondTwin.orientation;
+    
+    tolerance = 13 * degree;
+    isPrimary = false(length(grains), 1);
+    isSecondary = false(length(grains), 1);
+    primaryVariantId = zeros(length(grains), 1);
+    secondaryVariantId = zeros(length(grains), 2);
+
+    for j = 1:length(grains)
+        if any(grains(j).id == parentGrains.id), continue; end
+        [minAngle, bestFit] = min(angle(grains(j).meanOrientation, primary_twin_oris));
+        if minAngle < tolerance
+            isPrimary(j) = true;
+            primaryVariantId(j) = primaryTwin(bestFit).variantId;
+        end
+    end
+
+    for j = 1:length(grains)
+        if any(grains(j).id == parentGrains.id) || isPrimary(j), continue; end
+        [minAngle, bestFit] = min(angle(grains(j).meanOrientation, secondary_twin_oris));
+        if minAngle < tolerance
+            isSecondary(j) = true;
+            secondaryVariantId(j,:) = [secondTwin(bestFit).parent.variantId, secondTwin(bestFit).variantId];
+        end
+    end
+
+    % --- Plotting Twin Map ---
+    variant_alpha = 1;
+    fig_twins = figure('Name', ['Twin Variants - ' currentFile], 'Visible', 'off');
+    % plot(ebsd, cibw, 'micronbar', 'on');
+    % hold on;
+
+    plot(parentGrains, 'facecolor', [0.8 0.8 0.8], 'facealpha', variant_alpha);
+    
+    varColors = lines(length(tS_sym));
+
+    primaryGrains = grains(isPrimary);
+    varIds = primaryVariantId(isPrimary);
+    uniqueVars = unique(varIds);
+    for v_idx = 1:length(uniqueVars)
+        variant = uniqueVars(v_idx);
+        if variant == 0, continue; end
+        g_var = primaryGrains(varIds == variant);
+        hold on;
+        plot(g_var, 'facecolor', varColors(variant,:), 'facealpha', variant_alpha);
+    end
+
+    secondaryGrains = grains(isSecondary);
+    if ~isempty(secondaryGrains)
+        hold on
+        plot(secondaryGrains, 'facecolor', 'w', 'facealpha', variant_alpha);
+        secIds = secondaryVariantId(isSecondary, :);
+        %labels = arrayfun(@(x) sprintf('T%d,%d', secIds(x,1), secIds(x,2)), 1:size(secIds,1), 'UniformOutput', false);
+        %text(secondaryGrains, labels, 'HorizontalAlignment', 'center');
+    end
+
+    hold on;
+    plot(grains.boundary, 'linewidth', 1.5, 'linecolor', 'k');
+    
+    title(['Twin Variants - ', baseName], 'Interpreter', 'none');
+    
+    % --- Export Twin Map Figure ---
+    out_name_twins = fullfile(outDir, sprintf('%s_TwinVariants_TunedCI.jpg', baseName));
+    exportScaledFigure(fig_twins, out_name_twins, 'noDateString');
+    close(fig_twins);
+    
+    fprintf('  -> Saved twin variants plot to %s\n', out_name_twins);
 end
 
 fprintf('\nFinished generating pretty IPF plots for Re_PTP_3!\n');
