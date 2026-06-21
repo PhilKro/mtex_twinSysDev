@@ -9,10 +9,10 @@ plottingConvention.default.east = xvector;
 plottingConvention.default.outOfScreen = -zvector;
 
 % filename
-% dir = 'userScripts/Kamila';
-% file = 'Sample48 Site 3 Map Data 6_Map_Data_6_CircMask_EntireMap_NoGB_BW158.ang';
-dir = 'onedriveData/Kamila';
-file = 'pillar29 Specimen 3 Site 1 Map Data 3_BW158.ang';
+dir = 'userScripts/Kamila';
+file = 'Sample48 Site 3 Map Data 6_Map_Data_6_CircMask_EntireMap_NoGB_BW158.ang';
+% dir = 'onedriveData/Kamila';
+% file = 'pillar29 Specimen 3 Site 1 Map Data 3_BW158.ang';
 
 path = fullfile(dir, file);
 
@@ -141,96 +141,15 @@ tS_sym = tS_1121.symmetrise; % Get all variants
 twinMisoris = tS_sym.parentTwinMisorientation;
 numVariants = length(twinMisoris);
 
-% 2. Evaluate variants using absolute mean orientations to avoid FZ projection issues
-% Extract all valid boundary segments
-validEdges = gB.grainId(:,1) > 0 & gB.grainId(:,2) > 0;
-gid1 = gB.grainId(validEdges, 1);
-gid2 = gB.grainId(validEdges, 2);
-
-ind1 = id2ind(grains, gid1);
-ind2 = id2ind(grains, gid2);
-
-O1 = grains(ind1).meanOrientation;
-O2 = grains(ind2).meanOrientation;
-
-% Vectorized angle calculation across all boundary pairs
-twinMatch_valid = zeros(length(gid1), numVariants);
-for v = 1:numVariants
-    twinMatch_valid(:, v) = angle(O1 * twinMisoris(v), O2);
-end
-
-% Map the results back to the original gB array size
-twinMatch = inf(length(gB), numVariants);
-twinMatch(validEdges, :) = twinMatch_valid;
-
-[minAngle, variantId] = min(twinMatch, [], 2);
-
-% 3. Identify twin boundaries based on a threshold angle
+% 2. Identify Twin Boundaries (Local Pixel Misorientation)
+% Using MTEX's internal symmetry handling, we check the deviation 
+% of the local boundary misorientation from the theoretical twin system.
 twinThresh = 5 * degree;
-isTwinBoundary = minAngle < twinThresh;
+isTwinBoundary = angle(gB.misorientation, tS_1121.parentTwinMisorientation) < twinThresh;
 
-% 4. Plot the grain map with different twin variants
-figure;
-plot(grains, grains.meanOrientation);
-hold on
-% Plot normal grain boundaries
-plot(grains.boundary, 'lineColor', [0.5 0.5 0.5], 'lineWidth', 1);
-
-% Define a colormap for the variants
-cmap = lines(numVariants);
-
-% Plot each variant with a different color
-for v = 1:numVariants
-    isCurrentVariant = isTwinBoundary & (variantId == v);
-    if any(isCurrentVariant)
-        plot(gB(isCurrentVariant), 'lineColor', cmap(v,:), 'lineWidth', 3, 'DisplayName', sprintf('Variant %d', v));
-    end
-end
-title('11-21 Twin Variants')
-hold off
-
-%% 5. Build the Quotient Graph
-% Extract the grain IDs for the boundaries that have a twinning relationship
-twinPairs = gB.grainId(isTwinBoundary, :);
-twinPairsVariants = variantId(isTwinBoundary);
-
-% Filter out boundaries to unindexed regions (grainId == 0)
-validEdges = twinPairs(:,1) > 0 & twinPairs(:,2) > 0;
-twinPairs = twinPairs(validEdges, :);
-twinPairsVariants = twinPairsVariants(validEdges);
-
-% Find unique grain pairs that share a twin boundary
-[uPairs, ~, ic] = unique(sort(twinPairs, 2), 'rows');
-uVariants = zeros(size(uPairs, 1), 1);
-for i = 1:size(uPairs, 1)
-    uVariants(i) = mode(twinPairsVariants(ic == i));
-end
-% 2. Identify Uncolored Twin Boundaries (Any Variant)
+% Filter out boundaries to unindexed regions
 validEdges = gB.grainId(:,1) > 0 & gB.grainId(:,2) > 0;
-gid1 = gB.grainId(validEdges, 1);
-gid2 = gB.grainId(validEdges, 2);
-
-ind1 = id2ind(grains, gid1);
-ind2 = id2ind(grains, gid2);
-
-O1 = grains(ind1).meanOrientation;
-O2 = grains(ind2).meanOrientation;
-
-% Calculate fit against any variant. MTEX angle naturally handles symmetry.
-twinMatch_valid = zeros(length(gid1), numVariants);
-for v = 1:numVariants
-    % Dropping 'noSym2' allows true physical distance calculation across FZ boundaries
-    twinMatch_valid(:, v) = angle(O1 * twinMisoris(v), O2);
-end
-
-% A boundary is a twin boundary if ANY variant matches within 5 degrees
-twinThresh = 5 * degree;
-[minAngle_valid, ~] = min(twinMatch_valid, [], 2);
-isTwinBoundary_valid = minAngle_valid < twinThresh;
-
-% Map back to original gB array size
-isTwinBoundary = false(length(gB), 1);
-isTwinBoundary(validEdges) = isTwinBoundary_valid;
+isTwinBoundary = isTwinBoundary & validEdges;
 
 % 3. Filtered Bipartite Projection (Topological Hierarchy)
 % Extract unique grain pairs connected by a twin boundary
