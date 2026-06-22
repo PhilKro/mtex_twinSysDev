@@ -1,6 +1,5 @@
 function h = plotUnitCells(ebsd,d,varargin)
 % plot EBSD map through imagesc
-
 % maybe we have a rotated unit cell
 if numel(unique(ebsd.unitCell.x))>2 || numel(unique(ebsd.unitCell.y))>2
   h = plotUnitCells@EBSD(ebsd,d,varargin{:});

@@ -317,25 +317,9 @@ classdef EBSD < phaseList & dynProp & dynOption
       if isa(s,'EBSD')
         ebsd = s; 
       else
-        if width(s.id) == 1
-          ebsd = EBSD;
-        elseif length(s.unitCell) == 6
-          ebsd = EBSDhex;
-          ebsd.isRowAlignment = s.isRowAlignment;
-          ebsd.dHex = s.dHex;
-        else
-          ebsd = EBSDsquare;
-        end
-        
+        ebsd = EBSD(vector3d,s.rot,s.phaseId,s.CSList,s.prop);
         ebsd.opt = s.opt;
-        ebsd.id = s.id;
-        ebsd.rotations = s.rotations;
-        ebsd.phaseId = s.phaseId;
-        ebsd.CSList = s.CSList;
-        ebsd.prop = s.prop;      
         ebsd.scanUnit = s.scanUnit;
-        ebsd.phaseMap = s.phaseMap;
-        ebsd.unitCell = s.unitCell;
       end
       
       % ensure pos is set correctly

@@ -17,9 +17,8 @@ function c = caliper(grains,varargin)
 %  cV    - @vector3d, norm(cV) is the length
 %
 % Options:
-%  shortest      - shortest caliper
-%  longest       - longest caliper = diameter of the grain
-%  shortestPerp  - normal to the shortest caliper          
+%  shortest  - shortest caliper
+%  longest   - longest caliper = diameter of the grain
 %              
 
 V = grains.allV;
@@ -83,7 +82,7 @@ elseif nargin > 1 && check_option(varargin,{'shortest','shortestPerp'})
   
     if check_option(varargin,'shortestPerp')
       omega(ig) = omega(ig) + pi/2;
-      c(ig) =  projectionLength(Vg, omega(ig));
+      c(ig) = scaling * projectionLength(Vg, omega(ig));
     end
     
   end

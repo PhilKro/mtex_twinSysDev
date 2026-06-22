@@ -25,7 +25,8 @@ function W = weightedBurgersVec(ebsd,varargin)
 %
 % Options
 %  gradient   - use the gradient (Note, windowSize is always 1!)
-%  windowSize - radius of the integral window (default = 1), only used with integral method 
+%  windowSize - radius of the integral window (default = 1),
+%               only used with integral method 
 %
 % References
 %
