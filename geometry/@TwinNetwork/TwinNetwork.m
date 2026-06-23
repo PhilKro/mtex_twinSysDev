@@ -85,99 +85,21 @@ classdef TwinNetwork < handle
         function obj = buildTopology(obj)
             % Identifies boundaries and builds the Equivalence and Quotient Graphs
             
-            validEdges = obj.gB.grainId(:,1) > 0 & obj.gB.grainId(:,2) > 0;
+            topo = TwinNetwork.generateTopologyStruct(obj.gB, obj.grains, obj.settings, obj.twinMisoris, obj.doubleTwinMisoris);
             
-            % 1. Primary Twins
-            isTwinBoundary = any(angle(obj.gB.misorientation, obj.twinMisoris) < obj.settings.twinThresh, 2);
-            isTwinBoundary = isTwinBoundary & validEdges;
-            
-            twinEdges = obj.gB.grainId(isTwinBoundary, :);
-            obj.uPairs = unique(sort(twinEdges, 2), 'rows');
-            
-            % 2. Double Twins (Consumed Primary Twins)
-            isDoubleTwinBoundary = false(length(obj.gB), 1);
-            if obj.settings.detectConsumedTwins
-                for k = 1:length(obj.doubleTwinMisoris)
-                    match = angle(obj.gB.misorientation, obj.doubleTwinMisoris(k)) < obj.settings.twinThresh;
-                    isDoubleTwinBoundary = isDoubleTwinBoundary | match;
-                end
-                isDoubleTwinBoundary = isDoubleTwinBoundary & validEdges & ~isTwinBoundary;
-            end
-            
-            doubleTwinEdges = obj.gB.grainId(isDoubleTwinBoundary, :);
-            obj.uDoublePairs = unique(sort(doubleTwinEdges, 2), 'rows');
-            
-            % 3. Equivalence Graph (Grains connected by low angle boundaries)
-            obj.activeGrains = unique([obj.uPairs(:); obj.uDoublePairs(:)]);
+            obj.uPairs = topo.uPairs;
+            obj.uDoublePairs = topo.uDoublePairs;
+            obj.activeGrains = topo.activeGrains;
+            obj.G_equiv = topo.G_equiv;
+            obj.bins = topo.bins;
+            obj.virtualNodeBase = topo.virtualNodeBase;
+            obj.Q_G = topo.Q_G;
+            obj.compBins = topo.compBins;
+            obj.uniqueComps = topo.uniqueComps;
+            obj.superNodeArea = topo.superNodeArea;
             
             if isempty(obj.activeGrains)
                 warning('No active twinning grains found.');
-                return;
-            end
-            
-            lowAngleThresh = 15 * degree;
-            isEquivBoundary = obj.gB.misorientation.angle < lowAngleThresh & validEdges;
-            equivBoundaryPairs = obj.gB.grainId(isEquivBoundary, :);
-            
-            equivEdges = [];
-            for i = 1:size(equivBoundaryPairs, 1)
-                if ismember(equivBoundaryPairs(i,1), obj.activeGrains) && ismember(equivBoundaryPairs(i,2), obj.activeGrains)
-                    equivEdges = [equivEdges; sort(equivBoundaryPairs(i,:))];
-                end
-            end
-            
-            % Self loops to guarantee inclusion
-            if isempty(equivEdges)
-                equivEdges = [obj.activeGrains, obj.activeGrains];
-            else
-                equivEdges = [equivEdges; [obj.activeGrains, obj.activeGrains]];
-            end
-            
-            maxGid = max(obj.grains.id);
-            equivEdges = [equivEdges; [maxGid, maxGid]];
-            
-            obj.G_equiv = graph(equivEdges(:,1), equivEdges(:,2));
-            obj.bins = conncomp(obj.G_equiv);
-            
-            % 4. Quotient Graph
-            qPairs = [obj.bins(obj.uPairs(:,1))', obj.bins(obj.uPairs(:,2))'];
-            if ~isempty(qPairs)
-                isSelfLoop = qPairs(:,1) == qPairs(:,2);
-                qPairs(isSelfLoop, :) = [];
-            end
-            
-            obj.virtualNodeBase = max(obj.bins);
-            numVirtualNodes = size(obj.uDoublePairs, 1);
-            
-            for i = 1:numVirtualNodes
-                vNode = obj.virtualNodeBase + i;
-                u = obj.uDoublePairs(i, 1);
-                v = obj.uDoublePairs(i, 2);
-                qPairs = [qPairs; obj.bins(u), vNode; vNode, obj.bins(v)];
-            end
-            
-            if isempty(qPairs)
-                obj.Q_G = graph();
-            else
-                obj.Q_G = graph(qPairs(:,1), qPairs(:,2));
-            end
-            
-            maxNodeID = obj.virtualNodeBase + numVirtualNodes;
-            if numnodes(obj.Q_G) < maxNodeID
-                obj.Q_G = addnode(obj.Q_G, maxNodeID - numnodes(obj.Q_G));
-            end
-            
-            % 5. Decompose Networks
-            obj.compBins = conncomp(obj.Q_G);
-            obj.uniqueComps = unique(obj.compBins);
-            
-            % Precompute super node areas
-            obj.superNodeArea = zeros(obj.virtualNodeBase, 1);
-            for i = 1:length(obj.activeGrains)
-                gid = obj.activeGrains(i);
-                sn = obj.bins(gid);
-                ind = id2ind(obj.grains, gid);
-                obj.superNodeArea(sn) = obj.superNodeArea(sn) + obj.grains(ind).grainSize;
             end
         end
         
@@ -277,64 +199,27 @@ classdef TwinNetwork < handle
                         child_ind = id2ind(obj.grains, child_gid);
                         O_child = obj.grains(child_ind).meanOrientation;
                         
-                        foundSpawningVariant = false;
-                        edgesWithChild = find(obj.uPairs(:,1) == child_gid | obj.uPairs(:,2) == child_gid);
-                        for e = 1:length(edgesWithChild)
-                            idx = edgesWithChild(e);
-                            parent_gid = obj.uPairs(idx, 1);
-                            if parent_gid == child_gid, parent_gid = obj.uPairs(idx, 2); end
-                            
-                            if obj.grainGen(parent_gid) == gen - 1 && ~isempty(obj.variantPath{parent_gid}) || (gen == 1 && obj.grainGen(parent_gid) == 0)
-                                O_ideal_parent = obj.idealOri(parent_gid);
-                                O_actual_parent = obj.grains(id2ind(obj.grains, parent_gid)).meanOrientation;
-                                O_parent_fixed = O_actual_parent.project2FundamentalRegion(O_ideal_parent);
-                                
-                                fit = zeros(1, obj.numVariants);
-                                for v = 1:obj.numVariants
-                                    fit(v) = angle(O_parent_fixed * obj.twinMisoris(v), O_child);
-                                end
-                                
-                                [~, bestVar] = min(fit);
-                                obj.spawnVariant(child_ind) = bestVar;
-                                obj.idealOri(child_gid) = O_parent_fixed * obj.twinMisoris(bestVar);
-                                obj.variantPath{child_gid} = [obj.variantPath{parent_gid}, bestVar];
-                                foundSpawningVariant = true;
-                                break;
-                            end
-                        end
+                        [success, bestVar, O_ideal, newPath] = obj.resolveVariantMatch(...
+                            child_gid, gen, O_child, obj.uPairs, obj.twinMisoris, (1:obj.numVariants)', 1);
                         
-                        if foundSpawningVariant
+                        if success
+                            obj.spawnVariant(child_ind) = bestVar;
+                            obj.idealOri(child_gid) = O_ideal;
+                            obj.variantPath{child_gid} = newPath;
                             successfulGids = [successfulGids; child_gid];
                             continue;
                         end
                         
                         % Double Twins
-                        edgesWithChild = find(obj.uDoublePairs(:,1) == child_gid | obj.uDoublePairs(:,2) == child_gid);
-                        for e = 1:length(edgesWithChild)
-                            idx = edgesWithChild(e);
-                            parent_gid = obj.uDoublePairs(idx, 1);
-                            if parent_gid == child_gid, parent_gid = obj.uDoublePairs(idx, 2); end
-                            
-                            if obj.grainGen(parent_gid) == gen - 2 && ~isempty(obj.variantPath{parent_gid}) || (gen == 2 && obj.grainGen(parent_gid) == 0)
-                                O_ideal_parent = obj.idealOri(parent_gid);
-                                O_actual_parent = obj.grains(id2ind(obj.grains, parent_gid)).meanOrientation;
-                                O_parent_fixed = O_actual_parent.project2FundamentalRegion(O_ideal_parent);
-                                
-                                fit = zeros(size(obj.doubleTwinMisoris, 1), 1);
-                                for v = 1:length(obj.doubleTwinMisoris)
-                                    fit(v) = angle(O_parent_fixed * obj.doubleTwinMisoris(v), O_child);
-                                end
-                                
-                                [~, bestDoubleIdx] = min(fit);
-                                v1 = obj.doubleTwinPairsVariants(bestDoubleIdx, 1);
-                                v2 = obj.doubleTwinPairsVariants(bestDoubleIdx, 2);
-                                
-                                obj.spawnVariant(child_ind) = v2;
-                                obj.idealOri(child_gid) = O_parent_fixed * obj.doubleTwinMisoris(bestDoubleIdx);
-                                obj.variantPath{child_gid} = [obj.variantPath{parent_gid}, v1, v2];
-                                successfulGids = [successfulGids; child_gid];
-                                break;
-                            end
+                        [success, bestVar, O_ideal, newPath] = obj.resolveVariantMatch(...
+                            child_gid, gen, O_child, obj.uDoublePairs, obj.doubleTwinMisoris, obj.doubleTwinPairsVariants, 2);
+                        
+                        if success
+                            obj.spawnVariant(child_ind) = bestVar;
+                            obj.idealOri(child_gid) = O_ideal;
+                            obj.variantPath{child_gid} = newPath;
+                            successfulGids = [successfulGids; child_gid];
+                            continue;
                         end
                     end
                     
@@ -402,29 +287,35 @@ classdef TwinNetwork < handle
             activeInds = id2ind(obj.grains, obj.activeGrains);
             genProp(activeInds) = obj.grainGen(obj.activeGrains);
             
-            compGens = genProp(genProp < inf);
-            if isempty(compGens)
-                maxGenPlot = 0;
-            else
-                maxGenPlot = max(compGens);
-            end
+            % Plot generation layers (Parent = Gen 0, Primary = Gen 1...)
             
             figure;
             plot(obj.grains, obj.grains.meanOrientation, 'faceAlpha', 0.2); 
             hold on;
             plot(obj.grains.boundary, 'lineColor', [0.5 0.5 0.5], 'lineWidth', 1);
             
-            if maxGenPlot > 0
+            genProp = inf(max(obj.grains.id), 1);
+            genProp(obj.activeGrains) = obj.grainGen(obj.activeGrains);
+            maxGenPlot = max(genProp(genProp < inf));
+            
+            if ~isempty(maxGenPlot)
                 cmapGen = lines(maxGenPlot + 1);
-                for gen = 0:maxGenPlot
-                    inds = activeInds(genProp(activeInds) == gen);
-                    if ~isempty(inds)
-                        hold on;
-                        plot(obj.grains(inds), 'faceColor', cmapGen(gen + 1, :), 'faceAlpha', 0.8);
+                for g = 0:maxGenPlot
+                    gInds = id2ind(obj.grains, find(genProp == g));
+                    if ~isempty(gInds)
+                        if g == 0
+                            hold on
+                            plot(obj.grains(gInds), 'faceColor', [0.3 0.3 0.3], 'DisplayName', 'Parent (Gen 0)');
+                        else
+                            hold on
+                            plot(obj.grains(gInds), 'faceColor', cmapGen(g+1, :), 'DisplayName', sprintf('Generation %d', g));
+                        end
                     end
                 end
             end
-            title('Twinning Generations');
+            title('Twin Generations (Filtered Bipartite Projection)')
+            legend('show', 'Location', 'northeastoutside');
+            hold off;
         end
         
         function plotTwinVariants(obj)
@@ -490,6 +381,162 @@ classdef TwinNetwork < handle
             end
             text(obj.grains, labels, 'FontSize', 8, 'BackgroundColor', 'w');
             title('Twinning Variants (Blue=Type1, Pink=Type2)');
+        end
+    end
+    
+    methods (Access = private)
+        function [success, spawnVar, O_ideal_child, newPath] = resolveVariantMatch(obj, child_gid, gen, O_child, edgeList, misoriArray, variantMap, genStep)
+            success = false;
+            spawnVar = 0;
+            O_ideal_child = orientation.empty;
+            newPath = [];
+            
+            edgesWithChild = find(edgeList(:,1) == child_gid | edgeList(:,2) == child_gid);
+            if isempty(edgesWithChild)
+                return;
+            end
+            
+            for e = 1:length(edgesWithChild)
+                idx = edgesWithChild(e);
+                parent_gid = edgeList(idx, 1);
+                if parent_gid == child_gid
+                    parent_gid = edgeList(idx, 2); 
+                end
+                
+                % Guard clause: Validate parent generation based on step size
+                isValidParent = (obj.grainGen(parent_gid) == gen - genStep && ~isempty(obj.variantPath{parent_gid})) || ...
+                                (gen == genStep && obj.grainGen(parent_gid) == 0);
+                if ~isValidParent
+                    continue;
+                end
+                
+                O_ideal_parent = obj.idealOri(parent_gid);
+                O_actual_parent = obj.grains(id2ind(obj.grains, parent_gid)).meanOrientation;
+                O_parent_fixed = O_actual_parent.project2FundamentalRegion(O_ideal_parent);
+                
+                numMisoris = length(misoriArray);
+                fit = zeros(numMisoris, 1);
+                for v = 1:numMisoris
+                    fit(v) = angle(O_parent_fixed * misoriArray(v), O_child);
+                end
+                
+                [~, bestIdx] = min(fit);
+                
+                vars = variantMap(bestIdx, :);
+                spawnVar = vars(end);
+                
+                O_ideal_child = O_parent_fixed * misoriArray(bestIdx);
+                newPath = [obj.variantPath{parent_gid}, vars];
+                success = true;
+                return;
+            end
+        end
+    end
+    
+    methods (Static)
+        function topo = generateTopologyStruct(gB, grains, settings, twinMisoris, doubleTwinMisoris)
+            % Identifies boundaries and builds the Equivalence and Quotient Graphs
+            topo = struct();
+            validEdges = gB.grainId(:,1) > 0 & gB.grainId(:,2) > 0;
+            
+            % 1. Primary Twins
+            isTwinBoundary = any(angle(gB.misorientation, twinMisoris) < settings.twinThresh, 2);
+            isTwinBoundary = isTwinBoundary & validEdges;
+            
+            twinEdges = gB.grainId(isTwinBoundary, :);
+            topo.uPairs = unique(sort(twinEdges, 2), 'rows');
+            
+            % 2. Double Twins (Consumed Primary Twins)
+            isDoubleTwinBoundary = false(length(gB), 1);
+            if settings.detectConsumedTwins
+                for k = 1:length(doubleTwinMisoris)
+                    match = angle(gB.misorientation, doubleTwinMisoris(k)) < settings.twinThresh;
+                    isDoubleTwinBoundary = isDoubleTwinBoundary | match;
+                end
+                isDoubleTwinBoundary = isDoubleTwinBoundary & validEdges & ~isTwinBoundary;
+            end
+            
+            doubleTwinEdges = gB.grainId(isDoubleTwinBoundary, :);
+            topo.uDoublePairs = unique(sort(doubleTwinEdges, 2), 'rows');
+            
+            % 3. Equivalence Graph (Grains connected by low angle boundaries)
+            topo.activeGrains = unique([topo.uPairs(:); topo.uDoublePairs(:)]);
+            
+            if isempty(topo.activeGrains)
+                topo.G_equiv = graph();
+                topo.bins = [];
+                topo.Q_G = graph();
+                topo.virtualNodeBase = 0;
+                topo.compBins = [];
+                topo.uniqueComps = [];
+                topo.superNodeArea = [];
+                return;
+            end
+            
+            lowAngleThresh = 15 * degree;
+            isEquivBoundary = gB.misorientation.angle < lowAngleThresh & validEdges;
+            equivBoundaryPairs = gB.grainId(isEquivBoundary, :);
+            
+            equivEdges = [];
+            for i = 1:size(equivBoundaryPairs, 1)
+                if ismember(equivBoundaryPairs(i,1), topo.activeGrains) && ismember(equivBoundaryPairs(i,2), topo.activeGrains)
+                    equivEdges = [equivEdges; sort(equivBoundaryPairs(i,:))];
+                end
+            end
+            
+            % Self loops to guarantee inclusion
+            if isempty(equivEdges)
+                equivEdges = [topo.activeGrains, topo.activeGrains];
+            else
+                equivEdges = [equivEdges; [topo.activeGrains, topo.activeGrains]];
+            end
+            
+            maxGid = max(grains.id);
+            equivEdges = [equivEdges; [maxGid, maxGid]];
+            
+            topo.G_equiv = graph(equivEdges(:,1), equivEdges(:,2));
+            topo.bins = conncomp(topo.G_equiv);
+            
+            % 4. Quotient Graph
+            qPairs = [topo.bins(topo.uPairs(:,1))', topo.bins(topo.uPairs(:,2))'];
+            if ~isempty(qPairs)
+                isSelfLoop = qPairs(:,1) == qPairs(:,2);
+                qPairs(isSelfLoop, :) = [];
+            end
+            
+            topo.virtualNodeBase = max(topo.bins);
+            numVirtualNodes = size(topo.uDoublePairs, 1);
+            
+            for i = 1:numVirtualNodes
+                vNode = topo.virtualNodeBase + i;
+                u = topo.uDoublePairs(i, 1);
+                v = topo.uDoublePairs(i, 2);
+                qPairs = [qPairs; topo.bins(u), vNode; vNode, topo.bins(v)];
+            end
+            
+            if isempty(qPairs)
+                topo.Q_G = graph();
+            else
+                topo.Q_G = graph(qPairs(:,1), qPairs(:,2));
+            end
+            
+            maxNodeID = topo.virtualNodeBase + numVirtualNodes;
+            if numnodes(topo.Q_G) < maxNodeID
+                topo.Q_G = addnode(topo.Q_G, maxNodeID - numnodes(topo.Q_G));
+            end
+            
+            % 5. Decompose Networks
+            topo.compBins = conncomp(topo.Q_G);
+            topo.uniqueComps = unique(topo.compBins);
+            
+            % Precompute super node areas
+            topo.superNodeArea = zeros(topo.virtualNodeBase, 1);
+            for i = 1:length(topo.activeGrains)
+                gid = topo.activeGrains(i);
+                sn = topo.bins(gid);
+                ind = id2ind(grains, gid);
+                topo.superNodeArea(sn) = topo.superNodeArea(sn) + grains(ind).grainSize;
+            end
         end
     end
 end
