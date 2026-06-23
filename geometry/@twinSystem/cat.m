@@ -25,7 +25,6 @@ for i = 1:numel(varargin)
     tSrotAxis{i} = tS2.rotAxis;
     tStwinType{i} = tS2.twinType;
     tSCRSS{i} = tS2.CRSS;
-    tSparent{i} = tS2.parent;
     tSvariantId{i} = tS2.variantId;
   end
 end
@@ -38,7 +37,6 @@ tS.k2 = cat(dim,tSk2{:});
 tS.rotAxis = cat(dim,tSrotAxis{:});
 tS.twinType = cat(dim,tStwinType{:});
 tS.CRSS = cat(dim,tSCRSS{:});
-tS.parent = cat(dim,tSparent{:});
 tS.variantId = cat(dim,tSvariantId{:});
 
 end

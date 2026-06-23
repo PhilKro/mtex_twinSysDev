@@ -16,7 +16,6 @@ classdef TwinNetwork < handle
         % Twin System Attributes
         twinMisoris % Array of misorientations for all variants
         numVariants % Total number of variants
-        cozonalPairs % Cozonal (Type 1) secondary pairings
         doubleTwinMisoris % Misorientations for double twins
         doubleTwinPairsVariants % Variant pairs for double twins
         
@@ -54,7 +53,7 @@ classdef TwinNetwork < handle
             % Default Settings
             p = inputParser;
             addParameter(p, 'detectConsumedTwins', true, @islogical);
-            addParameter(p, 'maxGenerationLimit', inf, @isnumeric);
+            addParameter(p, 'maxGenerationLimit', 2, @isnumeric);
             addParameter(p, 'twinThresh', 5 * degree, @isnumeric);
             parse(p, varargin{:});
             obj.settings = p.Results;
@@ -64,12 +63,7 @@ classdef TwinNetwork < handle
             tS_sym = tS.symmetrise;
             obj.twinMisoris = tS_sym.parentTwinMisorientation;
             obj.numVariants = length(obj.twinMisoris);
-            
-            % Type 1 cozonal pairs (hexagonal specific or general if implemented)
-            idx = nchoosek(1:length(tS_sym.rotAxis), 2);
-            valid = eq(tS_sym.rotAxis(idx(:,1)), tS_sym.rotAxis(idx(:,2)), 'noSymmetry', 'antipodal');
-            obj.cozonalPairs = idx(valid, :);
-            
+                       
             % Double Twin Variants setup
             obj.doubleTwinMisoris = [];
             obj.doubleTwinPairsVariants = [];
@@ -379,29 +373,15 @@ classdef TwinNetwork < handle
                 gInd = id2ind(obj.grains, gid);
                 path = obj.variantPath{gid};
                 
-                % Initialize with Identity (No deformation)
-                totalF = eye(3); 
-                
-                if ~isempty(path)
-                    for p = 1:length(path)
-                        variantIdx = path(p);
-                        vTS = tS_sym(variantIdx);
-                        
-                        % Grab displacement gradient tensor (crystal coords)
-                        H_tensor = vTS.displacementGradient;
-                        
-                        if isa(H_tensor, 'tensor') || isa(H_tensor, 'tensor3')
-                            H_mat = H_tensor.M; % Assuming .M extracts matrix. Adjust if MTEX uses .components
-                        else
-                            H_mat = double(H_tensor);
-                        end
-                        
-                        F_step = eye(3) + H_mat;
-                        totalF = F_step * totalF;
-                    end
+                % Parent orientation is required to transform into specimen coordinates
+                if isempty(obj.idealOri(gid)) || isnan(obj.idealOri(gid).phi1)
+                    pOri = obj.grains(gInd).meanOrientation;
+                else
+                    pOri = obj.idealOri(gid);
                 end
                 
-                obj.defGradient{gInd} = totalF;
+                % Call the clean graph-friendly deformation cascader on the symmetrized array
+                obj.defGradient{gInd} = tS_sym.calcDeformationSequence(path, pOri);
             end
         end
         
@@ -458,6 +438,12 @@ classdef TwinNetwork < handle
             type1IndsPlot = [];
             type2IndsPlot = [];
             labels = cell(length(obj.grains), 1);
+
+            % Type 1 cozonal pairs (hexagonal specific or general if implemented)
+            tS_sym = obj.tS.symmetrise;
+            idx = nchoosek(1:length(tS_sym.rotAxis), 2);
+            valid = eq(tS_sym.rotAxis(idx(:,1)), tS_sym.rotAxis(idx(:,2)), 'noSymmetry', 'antipodal');
+            cozonalPairs = idx(valid, :);
             
             for i = 1:length(obj.activeGrains)
                 gid = obj.activeGrains(i);
@@ -475,8 +461,8 @@ classdef TwinNetwork < handle
                 elseif gen == 2
                     v1 = path(1);
                     v2 = path(2);
-                    isCozonal = any((obj.cozonalPairs(:,1) == v1 & obj.cozonalPairs(:,2) == v2) | ...
-                                    (obj.cozonalPairs(:,1) == v2 & obj.cozonalPairs(:,2) == v1));
+                    isCozonal = any((cozonalPairs(:,1) == v1 & cozonalPairs(:,2) == v2) | ...
+                                    (cozonalPairs(:,1) == v2 & cozonalPairs(:,2) == v1));
                     if isCozonal
                         type1IndsPlot = [type1IndsPlot; gInd];
                     else

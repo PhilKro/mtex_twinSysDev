@@ -34,6 +34,8 @@ ebsd(ebsd.ci < thresh_ci) = 'notIndexed';
 rot = rotation.byAxisAngle(zvector,180*degree);
 ebsd = rotate(ebsd,rot,'keepXY');
 
+ebsd = rotate(ebsd,rot);
+
 % reference orientaiton for project2FundamentalRegion see https://github.com/mtex-toolbox/mtex/discussions/2311
 indebsd = ebsd('indexed');
 refebsd = indebsd(1);
@@ -141,7 +143,7 @@ detectParent2SecondaryTwinBoundaries = true; % Set to false to disable double-tw
 maxGenerationLimit = 3; % Enforces how deep the twinning can go (e.g., 2 restricts analysis to primary and secondary twins)
 
 % 1. Define the 11-21 twin system
-tS_1121 = twinSystem.hexagonal_1121_0001(CS);
+tS_1121 = twinSystem.hexagonal_1121(CS);
 % 2. Initialize the TwinNetwork
 % This class neatly encapsulates the graph-theoretical topology extraction,
 % multi-region decomposition, and exact reference frame propagation.

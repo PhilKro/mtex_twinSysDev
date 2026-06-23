@@ -26,7 +26,6 @@ if ~isa(tS,'twinSystem') && ~isempty(value)
 
   tS.CRSS = [];
   tS.twinType = [];
-  tS.parent = [];
   tS.variantId = [];
 end
 
@@ -47,7 +46,6 @@ switch s(1).type
      
       tS.CRSS = subsasgn(tS.CRSS,s(1),[]);
       tS.twinType = subsasgn(tS.twinType,s(1),[]);
-      tS.parent = subsasgn(tS.parent,s(1),[]);
       tS.variantId = subsasgn(tS.variantId,s(1),[]);
     else      
       tS.eta1 = subsasgn(tS.eta1,s(1),value.eta1);
@@ -60,7 +58,6 @@ switch s(1).type
      
       tS.CRSS = subsasgn(tS.CRSS,s(1),value.CRSS);
       tS.twinType = subsasgn(tS.twinType,s(1),value.twinType);
-      tS.parent = subsasgn(tS.parent,s(1),value.parent);
       tS.variantId = subsasgn(tS.variantId,s(1),value.variantId);
     end
   otherwise
