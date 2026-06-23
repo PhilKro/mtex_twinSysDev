@@ -134,10 +134,12 @@ figure; plot(ebsd,ebsd.orientations); nextAxis; plot(ebsd_filled, ebsd_filled.or
 tS_1121 = twinSystem.hexagonal_1121(CS);
 
 % 2. Initialize and run the TwinNetwork engine
-tN = TwinNetwork(grains, gB, tS_1121, 'twinThresh', 5*degree, 'maxGenerationLimit', 2);
+tN = TwinNetwork(grains, gB, tS_1121, 'twinThresh', 5*degree, 'detectDoubleTwins', true);
 tN = tN.buildTopology();
+tN.plotQuotientGraph();
+%%
 tN = tN.propagateReferences();
-tN = tN.calculateDeformation();
+% tN = tN.calculateDeformation();
 
 % 3. Plotting
 tN.plotQuotientGraph();
