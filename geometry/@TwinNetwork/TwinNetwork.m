@@ -8,13 +8,16 @@ classdef twinNetwork < handle
         Graph
         GraphUndirected
         virtualNodes
+        ebsd
+        edgeData
     end
 
     methods
-        function obj = twinNetwork(grains, gB, tS, varargin)
+        function obj = twinNetwork(grains, gB, tS, ebsd, varargin)
             obj.grains = grains;
             obj.gB = gB;
             obj.tS = tS;
+            obj.ebsd = ebsd;
 
             p = inputParser;
             addParameter(p, 'maxGenerationLimit', 2);
@@ -62,14 +65,32 @@ classdef twinNetwork < handle
                 currentMori = nextMori;
             end
 
-            % 1. Extract and sort grain IDs (ensures [1, 2] and [2, 1] are treated as the same pair)
-            grainIds = sort(obj.gB.grainId, 2);
-
-            % 2. Filter out specimen boundaries (where grainId is 0) first
-            % Filtering early keeps your tags perfectly aligned with your valid data
-            validMask = all(grainIds ~= 0, 2);
-            validGrainIds = grainIds(validMask, :);
-            validMisorientations = obj.gB.misorientation(validMask);
+            % 1. Create edgeData struct to rigorously cache valid boundary orientations
+            validMask = all(obj.gB.grainId ~= 0, 2);
+            
+            obj.edgeData = struct();
+            obj.edgeData.gB_index = find(validMask);
+            
+            % Using original un-sorted grain IDs for precise alignment with ebsdId
+            gB_grainId = obj.gB.grainId(validMask, :);
+            gB_ebsdId = obj.gB.ebsdId(validMask, :);
+            
+            obj.edgeData.grainId = gB_grainId;
+            obj.edgeData.ebsdId = gB_ebsdId;
+            
+            % Mean Orientations of grains on both sides
+            obj.edgeData.grainOri1 = obj.grains(gB_grainId(:,1)).meanOrientation;
+            obj.edgeData.grainOri2 = obj.grains(gB_grainId(:,2)).meanOrientation;
+            
+            % Orientations of EBSD pixels on both sides
+            obj.edgeData.ebsdOri1 = obj.ebsd(gB_ebsdId(:,1)).orientations;
+            obj.edgeData.ebsdOri2 = obj.ebsd(gB_ebsdId(:,2)).orientations;
+            
+            % Explicit boundary misorientation (ebsdOri2 -> ebsdOri1)
+            obj.edgeData.misorientation = inv(obj.edgeData.ebsdOri2) .* obj.edgeData.ebsdOri1;
+            
+            % 2. Extract and sort grain IDs for unique boundary pair grouping
+            validGrainIds = sort(gB_grainId, 2);
 
             % 3. Find unique pairs AND get the grouping tag for every segment
             % pairTags is a vector assigning an integer (1 to numPairs) to every valid boundary segment
@@ -85,10 +106,10 @@ classdef twinNetwork < handle
             id2idx = zeros(max(obj.grains.id), 1);
             id2idx(obj.grains.id) = 1:length(obj.grains);
 
-            % 4. Calculate the mean misorientation per pair without a loop
+            % 4. Calculate the mean misorientation per pair using edgeData
             % accumarray groups the row indices by their pairTags and applies the mean function
             rowIndices = (1:length(pairTags))';
-            meanMoriCell = accumarray(pairTags, rowIndices, [], @(idx) {mean(validMisorientations(idx))});
+            meanMoriCell = accumarray(pairTags, rowIndices, [], @(idx) {mean(obj.edgeData.misorientation(idx))});
 
             % 5. Vectorized angle calculation across all pairs and variants
             % Concatenate cell array into a single MTEX misorientation array
