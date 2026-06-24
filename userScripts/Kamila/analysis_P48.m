@@ -134,7 +134,7 @@ text(grains,grains.id)
 tS_1121 = twinSystem.hexagonal_1121(CS);
 
 % 2. Initialize and run the TwinNetwork engine
-tN = twinNetwork(grains, gB, tS_1121, 'twinThresh', 5*degree); %, 'detectDoubleTwins', true);
+tN = twinNetwork(grains, gB, tS_1121, ebsd, 'twinThresh', 5*degree); %, 'detectDoubleTwins', true);
 tN.plot('type', 'directed')
 tN.plot('type', 'undirected')
 %%

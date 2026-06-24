@@ -181,6 +181,9 @@ classdef twinNetwork < handle
                         if ~visited(nxtNode)
                             visited(nxtNode) = true;
                             queue(end+1) = nxtNode;
+                            is_newly_visited = true;
+                        else
+                            is_newly_visited = false;
                         end
 
                         % Identify the specific undirected edge
@@ -193,9 +196,11 @@ classdef twinNetwork < handle
                         end
                         edgeProcessed(loc) = true;
 
-                        % Determine directed variant sequence using boundary misorientation
+                        % Determine directed variant sequence using dynamic boundary misorientation
                         is_forward = currNode < nxtNode;
-                        m_boundary = mori_pairs(loc);
+                        
+                        pairIdxs = find(pairTags == loc);
+                        m_boundary = mean(obj.edgeData.misorientation(pairIdxs));
 
                         % MTEX boundary misorientation typically goes from grainId(2) to grainId(1)
                         if is_forward
@@ -204,10 +209,11 @@ classdef twinNetwork < handle
                             mori_directed = m_boundary;
                         end
 
-                        angList = angle(mori_directed, allMori(:)');
+                        angList = angle(mori_directed, allMori(:)', 'noSym1');
+                        angList = angList(:);
                         validMatches = angList < obj.twinThresh;
 
-                        scoreList = angList + genMori(:)' * 1000;
+                        scoreList = angList + genMori(:) * 1000;
                         scoreList(~validMatches) = inf;
 
                         [bestScore, minMoriIdx] = min(scoreList);
@@ -217,6 +223,39 @@ classdef twinNetwork < handle
                         else
                             % Should not happen since we already checked undirected, but just in case
                             seq = 1; % fallback
+                        end
+                        
+                        if is_newly_visited
+                            % Fetch current parent orientation from edgeData
+                            idx_curr1 = find(obj.edgeData.grainId(:,1) == currNode, 1);
+                            if ~isempty(idx_curr1)
+                                parentOri = obj.edgeData.grainOri1(idx_curr1);
+                            else
+                                idx_curr2 = find(obj.edgeData.grainId(:,2) == currNode, 1);
+                                parentOri = obj.edgeData.grainOri2(idx_curr2);
+                            end
+                            
+                            % Calculate target fundamental region center
+                            variant_mori = allMori(minMoriIdx);
+                            center_ori = parentOri * variant_mori;
+                            
+                            % Find all boundary segments containing nxtNode
+                            idx1 = obj.edgeData.grainId(:,1) == nxtNode;
+                            idx2 = obj.edgeData.grainId(:,2) == nxtNode;
+                            
+                            % Project grain and EBSD orientations
+                            if any(idx1)
+                                obj.edgeData.grainOri1(idx1) = obj.edgeData.grainOri1(idx1).project2FundamentalRegion(center_ori);
+                                obj.edgeData.ebsdOri1(idx1)  = obj.edgeData.ebsdOri1(idx1).project2FundamentalRegion(center_ori);
+                            end
+                            if any(idx2)
+                                obj.edgeData.grainOri2(idx2) = obj.edgeData.grainOri2(idx2).project2FundamentalRegion(center_ori);
+                                obj.edgeData.ebsdOri2(idx2)  = obj.edgeData.ebsdOri2(idx2).project2FundamentalRegion(center_ori);
+                            end
+                            
+                            % Recompute misorientations for affected segments
+                            idx_update = idx1 | idx2;
+                            obj.edgeData.misorientation(idx_update) = inv(obj.edgeData.ebsdOri2(idx_update)) .* obj.edgeData.ebsdOri1(idx_update);
                         end
 
                         prevNode = currNode;
