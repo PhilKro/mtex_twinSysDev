@@ -9,10 +9,10 @@ plottingConvention.default.east = xvector;
 plottingConvention.default.outOfScreen = -zvector;
 
 % filename
-dir = 'userScripts/Kamila';
-file = 'Sample48 Site 3 Map Data 6_Map_Data_6_CircMask_EntireMap_NoGB_BW158.ang';
-% dir = 'onedriveData/Kamila';
-% file = 'pillar29 Specimen 3 Site 1 Map Data 3_BW158.ang';
+% dir = 'userScripts/Kamila';
+% file = 'Sample48 Site 3 Map Data 6_Map_Data_6_CircMask_EntireMap_NoGB_BW158.ang';
+dir = 'onedriveData/Kamila';
+file = 'pillar29 Specimen 3 Site 1 Map Data 3_BW158.ang';
 
 path = fullfile(dir, file);
 
@@ -45,9 +45,17 @@ reforientation = orientation.byEuler(101.3*degree,10.3*degree,260.7*degree);
 
 ebsd.orientations = ebsd.orientations.project2FundamentalRegion(reforientation);
 ebsd0=ebsd;
+
+
+%% Crop EBSD Data
+% Define your rectangular region: [xmin, ymin, width, height]
+% uncomment the lines below to apply the crop
+region = [-6.5, -5.7, 0.8, 0.8]; 
+ebsd = ebsd(inpolygon(ebsd, region));
+ebsd0 = ebsd;
+
 ebsd=ebsd.gridify;
 ebsd0=ebsd0.gridify;
-
 %% some initial test plot %%%
 
 ipf=ipfColorKey(ebsd.CS);
@@ -132,19 +140,39 @@ text(grains,grains.id)
 
 % 1. Define the 11-21 twin system
 tS_1121 = twinSystem.hexagonal_1121(CS);
+tS_sym = tS_1121.symmetrise;
+tSsym_mios = tS_sym.parentTwinMisorientation;
+tSsym_mios.isImproper
+tSsym_ProperMios = -tSsym_mios;
 
 % 2. Initialize and run the TwinNetwork engine
 tN = twinNetwork(grains, gB, tS_1121, ebsd, 'twinThresh', 5*degree); %, 'detectDoubleTwins', true);
 tN.plot('type', 'directed')
 tN.plot('type', 'undirected')
-%%
-tN = tN.buildTopology();
-tN.plotQuotientGraph();
-%%
-tN = tN.propagateReferences();
-% tN = tN.calculateDeformation();
+%% trials
+g1m = grains(1).meanOrientation %euler angle 89.91 79.2896 274.246 Re
+g2m = grains(2).meanOrientation %euler angle 55.4031 67.3501  283.38 Re
+g3m = grains(3).meanOrientation %euler angle 89.906 79.4288 272.717 Re
+mori12 = inv(g1m)*g2m
 
-% 3. Plotting
-tN.plotQuotientGraph();
-tN.plotGenerations();
-tN.plotTwinVariants();
+g1m * mori12 % equals grains2 meanOri
+g2m
+%%
+angle(tSsym_mios, mori12,'noSym1')/degree % both times its variant 5
+angle(tSsym_ProperMios, mori12,'noSym1')/degree % both times its variant 5
+%%
+g1m * tSsym_mios(5)
+g1m * tSsym_ProperMios(5)
+g2m
+%%
+g1m*tSsym_mios
+g1m*tSsym_ProperMios
+angle(g2m, g1m*tSsym_ProperMios)/degree %the 1th variant is lowest angle
+ideal_g2m = g2m.project2FundamentalRegion(g1m*tSsym_ProperMios(1))
+angle(ideal_g2m, g2m)
+angle(g3m, ideal_g2m*tSsym_ProperMios)/degree % the 1st variant is again the lowest
+ideal_g3m = g3m.project2FundamentalRegion(ideal_g2m*tSsym_ProperMios(1))
+angle(ideal_g3m, g3m)
+% my logi is sound
+
+%

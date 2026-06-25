@@ -30,6 +30,9 @@ classdef twinNetwork < handle
             % Symmetrize twin system to get variants
             tS_sym = obj.tS.symmetrise;
             variants = tS_sym.parentTwinMisorientation;
+            if variants.isImproper
+                variants = -variants;
+            end
 
             % Precompute possible sequences
             allSeqs = {};
@@ -85,6 +88,20 @@ classdef twinNetwork < handle
             % Orientations of EBSD pixels on both sides
             obj.edgeData.ebsdOri1 = obj.ebsd(gB_ebsdId(:,1)).orientations;
             obj.edgeData.ebsdOri2 = obj.ebsd(gB_ebsdId(:,2)).orientations;
+            
+            % Compute meanEbsdOri grouped by strictly directed boundaries
+            [~, ~, dirTags] = unique(gB_grainId, 'rows');
+            meanE1 = accumarray(dirTags, (1:length(dirTags))', [], @(idx) {mean(obj.edgeData.ebsdOri1(idx))});
+            meanE2 = accumarray(dirTags, (1:length(dirTags))', [], @(idx) {mean(obj.edgeData.ebsdOri2(idx))});
+            
+            meanE1_array = [meanE1{:}];
+            meanE2_array = [meanE2{:}];
+            
+            obj.edgeData.meanEbsdOri1 = meanE1_array(dirTags);
+            obj.edgeData.meanEbsdOri1 = obj.edgeData.meanEbsdOri1(:).project2FundamentalRegion(obj.edgeData.grainOri1);
+            
+            obj.edgeData.meanEbsdOri2 = meanE2_array(dirTags);
+            obj.edgeData.meanEbsdOri2 = obj.edgeData.meanEbsdOri2(:).project2FundamentalRegion(obj.edgeData.grainOri2);
             
             % Explicit boundary misorientation (ebsdOri2 -> ebsdOri1)
             obj.edgeData.misorientation = inv(obj.edgeData.ebsdOri2) .* obj.edgeData.ebsdOri1;
@@ -198,18 +215,24 @@ classdef twinNetwork < handle
 
                         % Determine directed variant sequence using dynamic boundary misorientation
                         is_forward = currNode < nxtNode;
+                        warning('Are boundaries always defined from the grain with the smaller id to the larger id? this implies that i think')
                         
                         pairIdxs = find(pairTags == loc);
-                        m_boundary = mean(obj.edgeData.misorientation(pairIdxs));
-
-                        % MTEX boundary misorientation typically goes from grainId(2) to grainId(1)
-                        if is_forward
-                            mori_directed = inv(m_boundary);
-                        else
-                            mori_directed = m_boundary;
-                        end
-
-                        angList = angle(mori_directed, allMori(:)', 'noSym1');
+                        
+                        ebsd1ori = mean(obj.edgeData.meanEbsdOri1(pairIdxs));
+                        ebsd2ori = mean(obj.edgeData.meanEbsdOri2(pairIdxs));
+                        
+                        % m_boundary = mean(obj.edgeData.misorientation(pairIdxs));
+                        % % MTEX boundary misorientation typically goes from grainId(2) to grainId(1)
+                        % if is_forward
+                        %     mori_directed = inv(m_boundary);
+                        % else
+                        %     mori_directed = m_boundary;
+                        % end
+                        % angList = angle(mori_directed, allMori(:)', 'noSym1');
+                        
+                        angList = angle(ebsd2ori*allMori, ebsd1ori);
+                 
                         angList = angList(:);
                         validMatches = angList < obj.twinThresh;
 
@@ -243,14 +266,16 @@ classdef twinNetwork < handle
                             idx1 = obj.edgeData.grainId(:,1) == nxtNode;
                             idx2 = obj.edgeData.grainId(:,2) == nxtNode;
                             
-                            % Project grain and EBSD orientations
+                            % Project grain, EBSD, and meanEBSD orientations
                             if any(idx1)
                                 obj.edgeData.grainOri1(idx1) = obj.edgeData.grainOri1(idx1).project2FundamentalRegion(center_ori);
                                 obj.edgeData.ebsdOri1(idx1)  = obj.edgeData.ebsdOri1(idx1).project2FundamentalRegion(center_ori);
+                                obj.edgeData.meanEbsdOri1(idx1) = obj.edgeData.meanEbsdOri1(idx1).project2FundamentalRegion(center_ori);
                             end
                             if any(idx2)
                                 obj.edgeData.grainOri2(idx2) = obj.edgeData.grainOri2(idx2).project2FundamentalRegion(center_ori);
                                 obj.edgeData.ebsdOri2(idx2)  = obj.edgeData.ebsdOri2(idx2).project2FundamentalRegion(center_ori);
+                                obj.edgeData.meanEbsdOri2(idx2) = obj.edgeData.meanEbsdOri2(idx2).project2FundamentalRegion(center_ori);
                             end
                             
                             % Recompute misorientations for affected segments
