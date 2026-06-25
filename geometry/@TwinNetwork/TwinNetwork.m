@@ -69,13 +69,13 @@ classdef twinNetwork < handle
                 currentMori = nextMori;
             end
 
-            % 1. Create edgeData struct to rigorously cache valid boundary orientations
+            % 1. Create edgeData struct to cache valid boundary orientations
             validMask = all(obj.gB.grainId ~= 0, 2);
             
             obj.edgeData = struct();
             obj.edgeData.gB_index = find(validMask);
             
-            % Using original un-sorted grain IDs for precise alignment with ebsdId
+            % Using original grain IDs for alignment with ebsdId
             gB_grainId = obj.gB.grainId(validMask, :);
             gB_ebsdId = obj.gB.ebsdId(validMask, :);
             
@@ -90,7 +90,7 @@ classdef twinNetwork < handle
             obj.edgeData.ebsdOri1 = obj.ebsd(gB_ebsdId(:,1)).orientations;
             obj.edgeData.ebsdOri2 = obj.ebsd(gB_ebsdId(:,2)).orientations;
             
-            % Compute meanEbsdOri grouped by strictly directed boundaries
+            % Compute meanEbsdOri grouped by boundaries
             [~, ~, dirTags] = unique(gB_grainId, 'rows');
             meanE1 = accumarray(dirTags, (1:length(dirTags))', [], @(idx) {mean(obj.edgeData.ebsdOri1(idx))});
             meanE2 = accumarray(dirTags, (1:length(dirTags))', [], @(idx) {mean(obj.edgeData.ebsdOri2(idx))});
