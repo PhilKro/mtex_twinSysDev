@@ -13,6 +13,8 @@ classdef twinNetwork < handle
         QuotientGraph
         nodeGroups
         mstGraph
+        groupGenerations
+        groupVariantPaths
     end
     methods
         function obj = twinNetwork(grains, gB, tS, ebsd, varargin)
@@ -174,7 +176,7 @@ classdef twinNetwork < handle
             vNodeIdx = numPhysNodes;
             vNodeCoords = [];
             vNodeGens = {};
-
+            warning('Maybe start the graph from the grain with the lowest GROD to size ratio? or sth similar')
             for c = 1:max(bins)
                 compNodes = find(bins == c);
                 if length(compNodes) == 1
@@ -332,7 +334,7 @@ classdef twinNetwork < handle
             end
         end
 
-        function plot(obj, varargin)
+        function plotGraph(obj, varargin)
             p = inputParser;
             addOptional(p, 'type', 'tagged');
             parse(p, varargin{:});
@@ -443,6 +445,211 @@ classdef twinNetwork < handle
             end
 
             hold off;
+        end
+        
+        function plot(obj, varargin)
+            p = inputParser;
+            addParameter(p, 'twinsOnly', true);
+            parse(p, varargin{:});
+            twinsOnly = p.Results.twinsOnly;
+            
+            if isempty(obj.groupGenerations)
+                warning('TwinNetwork:plot:noParents', 'Parent identification not run. Please call identifyParents() first.');
+                return;
+            end
+            
+            figure;
+            % Initialize white base for all grains
+            numGrains = length(obj.grains);
+            faceColors = ones(numGrains, 3); 
+            
+            % We will also collect labels to plot text
+            labelCentersX = [];
+            labelCentersY = [];
+            labelTexts = {};
+            
+            cmap = lines();
+            numCmap = size(cmap, 1);
+            
+            maxPhysId = max(obj.grains.id);
+            id2idx = zeros(maxPhysId, 1);
+            id2idx(obj.grains.id) = 1:length(obj.grains);
+            
+            numNodesInG = length(obj.nodeGroups);
+            maxPhysIdSafe = min(maxPhysId, numNodesInG);
+            physNodeGroups = obj.nodeGroups(1:maxPhysIdSafe);
+            
+            toPlot = true(numGrains, 1);
+            bins = conncomp(obj.Graph);
+            compSizes = histcounts(bins, 1:max(bins)+1);
+            
+            for i = 1:maxPhysIdSafe
+                idx = id2idx(i);
+                if idx > 0
+                    c = bins(i);
+                    isIsolated = compSizes(c) <= 1;
+                    
+                    if twinsOnly && isIsolated
+                        toPlot(idx) = false;
+                        continue;
+                    end
+                    
+                    if isIsolated
+                        % Isolated grains stay default white, no text overlay
+                        continue;
+                    end
+                    
+                    g = physNodeGroups(i);
+                    if g > 0 && g <= length(obj.groupGenerations) && ~isnan(obj.groupGenerations(g))
+                        gen = obj.groupGenerations(g);
+                        path = obj.groupVariantPaths{g};
+                        
+                        % Determine color
+                        if gen == 0
+                            faceColors(idx, :) = [0.7 0.7 0.7]; % Grey
+                            lbl = 'P';
+                        elseif gen == 1
+                            variant = path(1);
+                            cIdx = mod(variant - 1, numCmap) + 1;
+                            faceColors(idx, :) = cmap(cIdx, :);
+                            lbl = sprintf('V%d', variant);
+                        elseif gen == 2
+                            variant = path(1);
+                            cIdx = mod(variant - 1, numCmap) + 1;
+                            baseColor = cmap(cIdx, :);
+                            faceColors(idx, :) = baseColor * 0.6; % Darker
+                            
+                            pathStr = sprintf('%d,', path);
+                            lbl = sprintf('V%s', pathStr(1:end-1));
+                        else
+                            faceColors(idx, :) = [0.50 1.00 0.00]; % Green
+                            
+                            if isempty(path)
+                                lbl = 'V';
+                            else
+                                pathStr = sprintf('%d,', path);
+                                lbl = sprintf('V%s', pathStr(1:end-1));
+                            end
+                        end
+                        
+                        c = obj.grains(idx).centroid;
+                        labelCentersX(end+1) = c.x;
+                        labelCentersY(end+1) = c.y;
+                        labelTexts{end+1} = lbl;
+                    end
+                end
+            end
+            
+            % Plot the grains
+            if twinsOnly
+                plot(obj.grains(toPlot), faceColors(toPlot, :), 'micronbar', 'off');
+            else
+                plot(obj.grains, faceColors, 'micronbar', 'off');
+            end
+            hold on;
+            
+            % Plot text
+            if ~isempty(labelTexts)
+                text(labelCentersX, labelCentersY, labelTexts, ...
+                    'HorizontalAlignment', 'center', ...
+                    'VerticalAlignment', 'middle', ...
+                    'FontSize', 10, ...
+                    'Color', 'k');
+            end
+            hold off;
+        end
+        
+        function identifyParents(obj, varargin)
+            p = inputParser;
+            addParameter(p, 'criterion', 'grainArea');
+            parse(p, varargin{:});
+            criterion = p.Results.criterion;
+            
+            if isempty(obj.QuotientGraph)
+                warning('TwinNetwork:identifyParents:emptyQuotient', 'QuotientGraph is empty. Computing quotient graph first.');
+                obj.computeQuotientGraph();
+            end
+            
+            Q = obj.QuotientGraph;
+            if isempty(Q) || numnodes(Q) == 0
+                return;
+            end
+            
+            numGroups = numnodes(Q);
+            obj.groupGenerations = nan(numGroups, 1);
+            obj.groupVariantPaths = cell(numGroups, 1);
+            
+            bins = conncomp(Q);
+            numComps = max(bins);
+            
+            maxPhysId = max(obj.grains.id);
+            id2idx = zeros(maxPhysId, 1);
+            id2idx(obj.grains.id) = 1:length(obj.grains);
+            
+            numNodesInG = length(obj.nodeGroups);
+            maxPhysIdSafe = min(maxPhysId, numNodesInG);
+            physNodeGroups = obj.nodeGroups(1:maxPhysIdSafe);
+            
+            for c = 1:numComps
+                groupsInComp = find(bins == c);
+                
+                if strcmpi(criterion, 'grainArea')
+                    bestArea = -1;
+                    parentGroup = groupsInComp(1);
+                    
+                    for i = 1:length(groupsInComp)
+                        g = groupsInComp(i);
+                        physIds = find(physNodeGroups == g);
+                        
+                        validPhysIds = physIds(physIds <= length(id2idx));
+                        grainIndices = id2idx(validPhysIds);
+                        validIndices = grainIndices(grainIndices > 0);
+                        
+                        areaSum = sum(obj.grains(validIndices).area);
+                        if areaSum > bestArea
+                            bestArea = areaSum;
+                            parentGroup = g;
+                        end
+                    end
+                else
+                    warning('TwinNetwork:identifyParents:unimplementedCriterion', 'Criterion %s not implemented. Falling back to arbitrary parent.', criterion);
+                    parentGroup = groupsInComp(1);
+                end
+                
+                % BFS from parentGroup
+                visited = false(numGroups, 1);
+                queue = parentGroup;
+                visited(parentGroup) = true;
+                
+                obj.groupGenerations(parentGroup) = 0;
+                obj.groupVariantPaths{parentGroup} = [];
+                
+                while ~isempty(queue)
+                    currGroup = queue(1);
+                    queue(1) = [];
+                    
+                    currGen = obj.groupGenerations(currGroup);
+                    currPath = obj.groupVariantPaths{currGroup};
+                    
+                    nbrs = neighbors(Q, currGroup);
+                    for n = 1:length(nbrs)
+                        nxtGroup = nbrs(n);
+                        if ~visited(nxtGroup)
+                            visited(nxtGroup) = true;
+                            
+                            edgeIdx = findedge(Q, currGroup, nxtGroup);
+                            edgeIdx = edgeIdx(1); % In case of multiple edges with different variants
+                            variantStr = Q.Edges.Variant{edgeIdx};
+                            variantNum = str2double(variantStr);
+                            
+                            obj.groupGenerations(nxtGroup) = currGen + 1;
+                            obj.groupVariantPaths{nxtGroup} = [currPath, variantNum];
+                            
+                            queue(end+1) = nxtGroup;
+                        end
+                    end
+                end
+            end
         end
         function [Q, groupIDs] = computeQuotientGraph(obj)
             G = obj.Graph;
