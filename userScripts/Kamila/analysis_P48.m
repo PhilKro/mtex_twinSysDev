@@ -9,10 +9,10 @@ plottingConvention.default.east = xvector;
 plottingConvention.default.outOfScreen = -zvector;
 
 % filename
-% dir = 'userScripts/Kamila';
-% file = 'Sample48 Site 3 Map Data 6_Map_Data_6_CircMask_EntireMap_NoGB_BW158.ang';
-dir = 'onedriveData/Kamila';
-file = 'pillar29 Specimen 3 Site 1 Map Data 3_BW158.ang';
+dir = 'userScripts/Kamila';
+file = 'Sample48 Site 3 Map Data 6_Map_Data_6_CircMask_EntireMap_NoGB_BW158.ang';
+% dir = 'onedriveData/Kamila';
+% file = 'pillar29 Specimen 3 Site 1 Map Data 3_BW158.ang';
 
 path = fullfile(dir, file);
 
@@ -52,11 +52,11 @@ ebsd0=ebsd;
 % uncomment the lines below to apply the crop
 % region = [-6.5, -5.7, 0.8, 0.8]; 
 % region = [-4.9, -6.2, 0.6, 0.8]; 
+% region = [-4.0, -3.2, 2.7, 2.7]; %for pillar 48
 % ebsd = ebsd(inpolygon(ebsd, region));
 % ebsd0 = ebsd;
-% 
-% ebsd=ebsd.gridify;
-% ebsd0=ebsd0.gridify;
+
+
 %% some initial test plot %%%
 
 ipf=ipfColorKey(ebsd.CS);
@@ -105,9 +105,6 @@ minSize = 10;
 % truction
 alpha = 2;
 
-%%% perform reconstruction %%%
-ebsd = ebsd0;
-
 [grains,ebsd.grainId,ebsd.mis2mean] = calcGrains(ebsd,'minPixel',minSize,'angle',grainThresh,'alpha',alpha);
 
 % take only boundaries between indexed grains
@@ -147,7 +144,7 @@ tSsym_mios.isImproper
 tSsym_ProperMios = -tSsym_mios;
 
 % 2. Initialize and run the TwinNetwork engine
-tN = twinNetwork(grains, gB, tS_1121, ebsd, 'twinThresh', 5*degree); %, 'detectDoubleTwins', true);
+tN = twinNetwork(grains, gB, tS_1121, ebsd, 'twinThresh', 3*degree); %, 'detectDoubleTwins', true);
 tN.plot('type', 'tagged')
 tN.plot('type', 'untagged')
 %% compute quotient

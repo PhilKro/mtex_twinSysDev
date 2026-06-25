@@ -23,7 +23,7 @@ classdef twinNetwork < handle
 
             p = inputParser;
             addParameter(p, 'maxGenerationLimit', 2);
-            addParameter(p, 'twinThresh', 5*degree);
+            addParameter(p, 'twinThresh', 3*degree);
             parse(p, varargin{:});
 
             obj.maxGenerationLimit = p.Results.maxGenerationLimit;
@@ -85,12 +85,12 @@ classdef twinNetwork < handle
             obj.edgeData.ebsdId = gB_ebsdId;
 
             % Mean Orientations of grains on both sides
-            obj.edgeData.grainOri1 = obj.grains(gB_grainId(:,1)).meanOrientation;
-            obj.edgeData.grainOri2 = obj.grains(gB_grainId(:,2)).meanOrientation;
+            obj.edgeData.grainOri1 = obj.grains(grains.id2ind(gB_grainId(:,1))).meanOrientation;
+            obj.edgeData.grainOri2 = obj.grains(grains.id2ind(gB_grainId(:,2))).meanOrientation;
 
             % Orientations of EBSD pixels on both sides
-            obj.edgeData.ebsdOri1 = obj.ebsd(gB_ebsdId(:,1)).orientations;
-            obj.edgeData.ebsdOri2 = obj.ebsd(gB_ebsdId(:,2)).orientations;
+            obj.edgeData.ebsdOri1 = obj.ebsd(ebsd.id2ind(gB_ebsdId(:,1))).orientations;
+            obj.edgeData.ebsdOri2 = obj.ebsd(ebsd.id2ind(gB_ebsdId(:,2))).orientations;
 
             % Compute meanEbsdOri grouped by boundaries
             [~, ~, dirTags] = unique(gB_grainId, 'rows');
