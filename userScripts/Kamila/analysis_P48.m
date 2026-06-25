@@ -153,6 +153,7 @@ tN.plot('type', 'untagged')
 %% compute quotient
 tN.computeQuotientGraph()
 tN.plot('type', 'quotient')
+tN.plot('type', 'mst')
 %% trials
 g1m = grains(1).meanOrientation %euler angle 89.91 79.2896 274.246 Re
 g2m = grains(2).meanOrientation %euler angle 55.4031 67.3501  283.38 Re

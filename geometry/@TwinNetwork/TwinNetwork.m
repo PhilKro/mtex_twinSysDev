@@ -12,6 +12,7 @@ classdef twinNetwork < handle
         edgeData
         QuotientGraph
         nodeGroups
+        mstGraph
     end
     methods
         function obj = twinNetwork(grains, gB, tS, ebsd, varargin)
@@ -72,42 +73,42 @@ classdef twinNetwork < handle
 
             % 1. Create edgeData struct to cache valid boundary orientations
             validMask = all(obj.gB.grainId ~= 0, 2);
-            
+
             obj.edgeData = struct();
             obj.edgeData.gB_index = find(validMask);
-            
+
             % Using original grain IDs for alignment with ebsdId
             gB_grainId = obj.gB.grainId(validMask, :);
             gB_ebsdId = obj.gB.ebsdId(validMask, :);
-            
+
             obj.edgeData.grainId = gB_grainId;
             obj.edgeData.ebsdId = gB_ebsdId;
-            
+
             % Mean Orientations of grains on both sides
             obj.edgeData.grainOri1 = obj.grains(gB_grainId(:,1)).meanOrientation;
             obj.edgeData.grainOri2 = obj.grains(gB_grainId(:,2)).meanOrientation;
-            
+
             % Orientations of EBSD pixels on both sides
             obj.edgeData.ebsdOri1 = obj.ebsd(gB_ebsdId(:,1)).orientations;
             obj.edgeData.ebsdOri2 = obj.ebsd(gB_ebsdId(:,2)).orientations;
-            
+
             % Compute meanEbsdOri grouped by boundaries
             [~, ~, dirTags] = unique(gB_grainId, 'rows');
             meanE1 = accumarray(dirTags, (1:length(dirTags))', [], @(idx) {mean(obj.edgeData.ebsdOri1(idx))});
             meanE2 = accumarray(dirTags, (1:length(dirTags))', [], @(idx) {mean(obj.edgeData.ebsdOri2(idx))});
-            
+
             meanE1_array = [meanE1{:}];
             meanE2_array = [meanE2{:}];
-            
+
             obj.edgeData.meanEbsdOri1 = meanE1_array(dirTags);
             obj.edgeData.meanEbsdOri1 = obj.edgeData.meanEbsdOri1(:).project2FundamentalRegion(obj.edgeData.grainOri1);
-            
+
             obj.edgeData.meanEbsdOri2 = meanE2_array(dirTags);
             obj.edgeData.meanEbsdOri2 = obj.edgeData.meanEbsdOri2(:).project2FundamentalRegion(obj.edgeData.grainOri2);
-            
+
             % Explicit boundary misorientation (ebsdOri2 -> ebsdOri1)
             obj.edgeData.misorientation = inv(obj.edgeData.ebsdOri2) .* obj.edgeData.ebsdOri1;
-            
+
             % 2. Extract and sort grain IDs for unique boundary pair grouping
             validGrainIds = sort(gB_grainId, 2);
 
@@ -168,6 +169,7 @@ classdef twinNetwork < handle
             s_nodes = [];
             t_nodes = [];
             variants_list = {};
+            angular_deviation_list = [];
 
             vNodeIdx = numPhysNodes;
             vNodeCoords = [];
@@ -218,10 +220,10 @@ classdef twinNetwork < handle
                         % Determine directed variant sequence using dynamic boundary misorientation
                         pairIdxs = find(pairTags == loc);
                         firstIdx = pairIdxs(1);
-                        
+
                         ebsd1ori = mean(obj.edgeData.meanEbsdOri1(pairIdxs));
                         ebsd2ori = mean(obj.edgeData.meanEbsdOri2(pairIdxs));
-                        
+
                         % Rigorously determine which orientation belongs to currNode (parent)
                         if obj.edgeData.grainId(firstIdx, 1) == currNode
                             currOri = ebsd1ori;
@@ -230,10 +232,10 @@ classdef twinNetwork < handle
                             currOri = ebsd2ori;
                             nxtOri  = ebsd1ori;
                         end
-                        
+
                         % Direct orientation angle evaluation (Angle between nxtOri and currOri * variant)
                         angList = angle(nxtOri, currOri * allMori(:)');
-                 
+
                         angList = angList(:);
                         validMatches = angList < obj.twinThresh;
 
@@ -244,20 +246,22 @@ classdef twinNetwork < handle
 
                         if bestScore < inf
                             seq = allSeqs{minMoriIdx};
+                            dev = angList(minMoriIdx);
                         else
                             % Should not happen since we already checked undirected, but just in case
                             seq = 1; % fallback
+                            dev = inf;
                         end
-                        
+
                         if is_newly_visited
                             % Calculate target fundamental region center based purely on the newly matched variant
                             variant_mori = allMori(minMoriIdx);
                             center_ori = currOri * variant_mori;
-                            
+
                             % Find all boundary segments containing nxtNode
                             idx1 = obj.edgeData.grainId(:,1) == nxtNode;
                             idx2 = obj.edgeData.grainId(:,2) == nxtNode;
-                            
+
                             % Project grain, EBSD, and meanEBSD orientations
                             if any(idx1)
                                 obj.edgeData.grainOri1(idx1) = obj.edgeData.grainOri1(idx1).project2FundamentalRegion(center_ori);
@@ -269,7 +273,7 @@ classdef twinNetwork < handle
                                 obj.edgeData.ebsdOri2(idx2)  = obj.edgeData.ebsdOri2(idx2).project2FundamentalRegion(center_ori);
                                 obj.edgeData.meanEbsdOri2(idx2) = obj.edgeData.meanEbsdOri2(idx2).project2FundamentalRegion(center_ori);
                             end
-                            
+
                             % Recompute misorientations for affected segments
                             idx_update = idx1 | idx2;
                             obj.edgeData.misorientation(idx_update) = inv(obj.edgeData.ebsdOri2(idx_update)) .* obj.edgeData.ebsdOri1(idx_update);
@@ -282,6 +286,7 @@ classdef twinNetwork < handle
                                 s_nodes(end+1, 1) = prevNode;
                                 t_nodes(end+1, 1) = nxtNode;
                                 variants_list{end+1, 1} = num2str(v_step);
+                                angular_deviation_list(end+1, 1) = dev;
                             else
                                 vNodeIdx = vNodeIdx + 1;
 
@@ -296,6 +301,7 @@ classdef twinNetwork < handle
                                 s_nodes(end+1, 1) = prevNode;
                                 t_nodes(end+1, 1) = vNodeIdx;
                                 variants_list{end+1, 1} = num2str(v_step);
+                                angular_deviation_list(end+1, 1) = dev;
 
                                 prevNode = vNodeIdx;
                             end
@@ -303,203 +309,390 @@ classdef twinNetwork < handle
                     end
                 end
             end
-            
+
             numTotalNodes = vNodeIdx;
 
-        finalG = graph();
-        if numTotalNodes > 0
-            finalG = addnode(finalG, numTotalNodes);
-        end
-
-        if ~isempty(s_nodes)
-            EdgeTable = table([s_nodes, t_nodes], variants_list, 'VariableNames', {'EndNodes', 'Variant'});
-            finalG = addedge(finalG, EdgeTable);
-        end
-
-        obj.Graph = finalG;
-        obj.untaggedGraph = G_undir;
-
-        if ~isempty(vNodeCoords)
-            obj.virtualNodes = table(vNodeCoords(:,1), vNodeCoords(:,2), vNodeGens, 'VariableNames', {'x', 'y', 'Sequence'});
-        else
-            obj.virtualNodes = table([], [], {}, 'VariableNames', {'x', 'y', 'Sequence'});
-        end
-    end
-
-    function plot(obj, varargin)
-        p = inputParser;
-        addOptional(p, 'type', 'tagged');
-        parse(p, varargin{:});
-        plotType = p.Results.type;
-
-        if strcmpi(plotType, 'untagged')
-            G = obj.untaggedGraph;
-        elseif strcmpi(plotType, 'quotient')
-            if isempty(obj.QuotientGraph)
-                obj.computeQuotientGraph();
+            finalG = graph();
+            if numTotalNodes > 0
+                finalG = addnode(finalG, numTotalNodes);
             end
-            G = obj.Graph;
-        else
-            G = obj.Graph;
-        end
 
-        if isempty(G) || numnodes(G) == 0
-            warning('TwinNetwork:plot:emptyGraph', 'Graph is empty or non-existent.');
-            return;
-        end
+            if ~isempty(s_nodes)
+                EdgeTable = table([s_nodes, t_nodes], variants_list, angular_deviation_list, 'VariableNames', {'EndNodes', 'Variant', 'AngularDeviation'});
+                finalG = addedge(finalG, EdgeTable);
+            end
 
-        figure;
-        plot(obj.grains, 'micronbar', 'off');
-        hold on;
+            obj.Graph = finalG;
+            obj.untaggedGraph = G_undir;
 
-        numNodesG = numnodes(obj.Graph);
-        X_G = zeros(numNodesG, 1);
-        Y_G = zeros(numNodesG, 1);
-
-        id2idx = zeros(max(obj.grains.id), 1);
-        id2idx(obj.grains.id) = 1:length(obj.grains);
-
-        for i = 1:max(obj.grains.id)
-            if id2idx(i) > 0
-                c = obj.grains(id2idx(i)).centroid;
-                X_G(i) = c.x;
-                Y_G(i) = c.y;
+            if ~isempty(vNodeCoords)
+                obj.virtualNodes = table(vNodeCoords(:,1), vNodeCoords(:,2), vNodeGens, 'VariableNames', {'x', 'y', 'Sequence'});
             else
-                X_G(i) = NaN;
-                Y_G(i) = NaN;
+                obj.virtualNodes = table([], [], {}, 'VariableNames', {'x', 'y', 'Sequence'});
             end
         end
 
-        if ~isempty(obj.virtualNodes) && size(obj.virtualNodes, 1) > 0
-            vStart = max(obj.grains.id) + 1;
-            X_G(vStart:end) = obj.virtualNodes.x;
-            Y_G(vStart:end) = obj.virtualNodes.y;
-        end
+        function plot(obj, varargin)
+            p = inputParser;
+            addOptional(p, 'type', 'tagged');
+            parse(p, varargin{:});
+            plotType = p.Results.type;
 
-        numPlotNodes = numnodes(G);
-        X_plot = X_G(1:numPlotNodes);
-        Y_plot = Y_G(1:numPlotNodes);
-        
-        pPlot = plot(G, 'XData', X_plot, 'YData', Y_plot);
-        pPlot.MarkerSize = 5;
-        pPlot.NodeColor = 'k';
-        pPlot.EdgeColor = 'k';
-        pPlot.LineWidth = 1.5;
-        
-        if ismember('Variant', G.Edges.Properties.VariableNames)
-            labeledge(pPlot, 1:numedges(G), G.Edges.Variant);
-        end
-        
-        nodeLabels = cell(numPlotNodes, 1);
-        for i = 1:numPlotNodes
-            if i <= max(obj.grains.id) && id2idx(i) > 0
-                nodeLabels{i} = num2str(i);
+            if strcmpi(plotType, 'untagged')
+                G = obj.untaggedGraph;
+            elseif strcmpi(plotType, 'mst')
+                if isempty(obj.mstGraph)
+                    warning('TwinNetwork:plot:emptyMST', 'MST is empty. Computing quotient graph first.');
+                    obj.computeQuotientGraph();
+                end
+                G = obj.mstGraph;
+            elseif strcmpi(plotType, 'quotient')
+                if isempty(obj.QuotientGraph)
+                    obj.computeQuotientGraph();
+                end
+                G = obj.Graph;
             else
-                nodeLabels{i} = '';
+                G = obj.Graph;
             end
-        end
-        pPlot.NodeLabel = nodeLabels;
 
-        if strcmpi(plotType, 'quotient')
-            cmap = lines();
-            numCmap = size(cmap, 1);
-            
-            bins = conncomp(G);
-            for c = 1:max(bins)
-                nodesInComp = find(bins == c);
-                groupsInComp = unique(obj.nodeGroups(nodesInComp));
-                
-                for k = 1:length(groupsInComp)
-                    grp = groupsInComp(k);
-                    colorIdx = mod(k - 1, numCmap) + 1;
-                    nodesInThisGroup = nodesInComp(obj.nodeGroups(nodesInComp) == grp);
-                    
-                    highlight(pPlot, nodesInThisGroup, 'NodeColor', cmap(colorIdx, :), 'MarkerSize', 8, 'Marker', 's');
+            if isempty(G) || numnodes(G) == 0
+                warning('TwinNetwork:plot:emptyGraph', 'Graph is empty or non-existent.');
+                return;
+            end
+
+            figure;
+            plot(obj.grains, 'micronbar', 'off');
+            hold on;
+
+            numNodesG = numnodes(obj.Graph);
+            X_G = zeros(numNodesG, 1);
+            Y_G = zeros(numNodesG, 1);
+
+            id2idx = zeros(max(obj.grains.id), 1);
+            id2idx(obj.grains.id) = 1:length(obj.grains);
+
+            for i = 1:max(obj.grains.id)
+                if id2idx(i) > 0
+                    c = obj.grains(id2idx(i)).centroid;
+                    X_G(i) = c.x;
+                    Y_G(i) = c.y;
+                else
+                    X_G(i) = NaN;
+                    Y_G(i) = NaN;
                 end
             end
-        elseif strcmpi(plotType, 'tagged') && ~isempty(obj.virtualNodes) && size(obj.virtualNodes, 1) > 0
-            vIdx = (max(obj.grains.id) + 1):numPlotNodes;
-            highlight(pPlot, vIdx, 'NodeColor', 'r', 'Marker', 'o', 'MarkerSize', 8);
-        end
 
-        hold off;
-    end
-    function [Q, groupIDs] = computeQuotientGraph(obj)
-        G = obj.Graph;
-        if isempty(G) || numnodes(G) == 0
-            Q = graph();
-            groupIDs = [];
-            obj.QuotientGraph = Q;
-            obj.nodeGroups = groupIDs;
-            return;
+            if ~isempty(obj.virtualNodes) && size(obj.virtualNodes, 1) > 0
+                vStart = max(obj.grains.id) + 1;
+                X_G(vStart:end) = obj.virtualNodes.x;
+                Y_G(vStart:end) = obj.virtualNodes.y;
+            end
+
+            numPlotNodes = numnodes(G);
+            X_plot = X_G(1:numPlotNodes);
+            Y_plot = Y_G(1:numPlotNodes);
+
+            pPlot = plot(G, 'XData', X_plot, 'YData', Y_plot);
+            pPlot.MarkerSize = 5;
+            pPlot.NodeColor = 'k';
+
+            if (strcmpi(plotType, 'tagged') || strcmpi(plotType, 'mst')) && ismember('AngularDeviation', G.Edges.Properties.VariableNames)
+                pPlot.EdgeCData = G.Edges.AngularDeviation ./ degree;
+                colormap(gca, 'jet');
+                cb = colorbar;
+                cb.Label.String = 'Angular Deviation (degrees)';
+            else
+                pPlot.EdgeColor = 'k';
+            end
+            pPlot.LineWidth = 1.5;
+
+            if ismember('Variant', G.Edges.Properties.VariableNames)
+                labeledge(pPlot, 1:numedges(G), G.Edges.Variant);
+            end
+
+            nodeLabels = cell(numPlotNodes, 1);
+            for i = 1:numPlotNodes
+                if i <= max(obj.grains.id) && id2idx(i) > 0
+                    nodeLabels{i} = num2str(i);
+                else
+                    nodeLabels{i} = '';
+                end
+            end
+            pPlot.NodeLabel = nodeLabels;
+
+            if strcmpi(plotType, 'quotient')
+                cmap = lines();
+                numCmap = size(cmap, 1);
+
+                bins = conncomp(G);
+                for c = 1:max(bins)
+                    nodesInComp = find(bins == c);
+                    groupsInComp = unique(obj.nodeGroups(nodesInComp));
+
+                    for k = 1:length(groupsInComp)
+                        grp = groupsInComp(k);
+                        colorIdx = mod(k - 1, numCmap) + 1;
+                        nodesInThisGroup = nodesInComp(obj.nodeGroups(nodesInComp) == grp);
+
+                        highlight(pPlot, nodesInThisGroup, 'NodeColor', cmap(colorIdx, :), 'MarkerSize', 8, 'Marker', 's');
+                    end
+                end
+            elseif strcmpi(plotType, 'tagged') && ~isempty(obj.virtualNodes) && size(obj.virtualNodes, 1) > 0
+                vIdx = (max(obj.grains.id) + 1):numPlotNodes;
+                highlight(pPlot, vIdx, 'NodeColor', 'r', 'Marker', 'o', 'MarkerSize', 8);
+            end
+
+            hold off;
         end
-        
-        numNodes = numnodes(G);
-        groupIDs = (1:numNodes)';
-        changed = true;
-        
-        while changed
-            changed = false;
-            u = groupIDs(G.Edges.EndNodes(:, 1));
-            v = groupIDs(G.Edges.EndNodes(:, 2));
-            vars = G.Edges.Variant;
-            
-            for i = 1:max(groupIDs)
-                idx_u = find(u == i);
-                idx_v = find(v == i);
-                
-                targets = [v(idx_u); u(idx_v)];
-                edgeVars = [vars(idx_u); vars(idx_v)];
-                
-                if isempty(targets)
+        function [Q, groupIDs] = computeQuotientGraph(obj)
+            G = obj.Graph;
+            if isempty(G) || numnodes(G) == 0
+                Q = graph();
+                groupIDs = [];
+                obj.QuotientGraph = Q;
+                obj.nodeGroups = groupIDs;
+                return;
+            end
+
+            numNodes = numnodes(G);
+            groupIDs = zeros(numNodes, 1);
+
+            % Store the "reduced word" state for every node
+            nodeStates = cell(numNodes, 1);
+
+            % Isolate connected components
+            bins = conncomp(G);
+            numComps = max(bins);
+
+            mstS = [];
+            mstT = [];
+            mstVar = {};
+            mstDev = [];
+            hasDeviation = ismember('AngularDeviation', G.Edges.Properties.VariableNames);
+
+            for c = 1:numComps
+                compNodeIdx = find(bins == c);
+                compNodeIdx = compNodeIdx(:);
+
+                % Base case for isolated nodes
+                if length(compNodeIdx) == 1
+                    nodeStates{compNodeIdx(1)} = sprintf('C%d_ROOT', c);
                     continue;
                 end
+
+                subG = subgraph(G, compNodeIdx);
+
+                % 1. Create Minimum Spanning Tree to avoid spurious cycles
+                if ismember('AngularDeviation', subG.Edges.Properties.VariableNames)
+                    subG.Edges.Weight = subG.Edges.AngularDeviation;
+                else
+                    warning('TwinNetwork:computeQuotientGraph:noWeight', ...
+                        'No ''AngularDeviation'' variable found in graph edges. Using default connectivity.');
+                    subG.Edges.Weight = ones(numedges(subG), 1);
+                end
+
+            % VIRTUAL NODE PENALTY
+            % Virtual nodes are defined as having an ID greater than the max physical grain ID
+            maxPhysId = max(obj.grains.id);
+            
+            % compNodeIdx maps the local subG nodes to their global G IDs
+            virtualLocalIdx = find(compNodeIdx > maxPhysId); 
+            
+            if ~isempty(virtualLocalIdx)
+                % Extract all edge endpoints in the current subgraph
+                endNodes = subG.Edges.EndNodes;
                 
-                [unqVars, ~, varIdx] = unique(edgeVars);
+                % Find any edge where either the source OR the target is a virtual node
+                virtualEdges = find(ismember(endNodes(:, 1), virtualLocalIdx) | ...
+                                    ismember(endNodes(:, 2), virtualLocalIdx));
                 
-                for j = 1:length(unqVars)
-                    t = targets(varIdx == j);
-                    if length(t) > 1
-                        first_t = t(1);
-                        for k = 2:length(t)
-                            if groupIDs(t(k)) ~= groupIDs(first_t)
-                                old_g = groupIDs(t(k));
-                                new_g = groupIDs(first_t);
-                                groupIDs(groupIDs == old_g) = new_g;
-                                changed = true;
+                % Add a massive penalty to these edges
+                virtualPenalty = 1000; 
+                subG.Edges.Weight(virtualEdges) = subG.Edges.Weight(virtualEdges) + virtualPenalty;
+            end
+            
+                % Compute the MST (it will use subG.Edges.Weight if we just created it)
+                [subMST, ~] = minspantree(subG);
+
+                if numedges(subMST) > 0
+                    localS = subMST.Edges.EndNodes(:, 1);
+                    localT = subMST.Edges.EndNodes(:, 2);
+                    mstS = [mstS; compNodeIdx(localS)];
+                    mstT = [mstT; compNodeIdx(localT)];
+                    mstVar = [mstVar; subMST.Edges.Variant];
+                    if hasDeviation
+                        mstDev = [mstDev; subMST.Edges.AngularDeviation];
+                    end
+                end
+
+                % 2. Breadth-First Search to assign algebraic states
+                rootNode = 1;
+
+                subStates = cell(numnodes(subMST), 1);
+                subStates{rootNode} = []; % The identity state
+
+                visited = false(numnodes(subMST), 1);
+                visited(rootNode) = true;
+
+                queue = rootNode;
+
+                while ~isempty(queue)
+                    currNode = queue(1);
+                    queue(1) = [];
+
+                    currState = subStates{currNode};
+
+                    nbrs = neighbors(subMST, currNode);
+                    for n = 1:length(nbrs)
+                        nxtNode = nbrs(n);
+                        if ~visited(nxtNode)
+                            visited(nxtNode) = true;
+
+                            % Find the edge variant in the MST
+                            edgeIdx = findedge(subMST, currNode, nxtNode);
+                            v_str = subMST.Edges.Variant{edgeIdx};
+                            v_num = str2double(v_str);
+
+                            % 3. The Algebraic Contraction Rule
+                            nxtState = currState;
+                            if ~isempty(nxtState) && nxtState(end) == v_num
+                                % Identical adjacent variants contract (cancel out)
+                                nxtState(end) = [];
+                            else
+                                % Otherwise, append to the sequence
+                                nxtState(end+1) = v_num;
                             end
+
+                            subStates{nxtNode} = nxtState;
+                            queue(end+1) = nxtNode;
                         end
                     end
                 end
+
+                % 4. Convert numeric arrays to strings for unique grouping
+                for i = 1:length(compNodeIdx)
+                    globalID = compNodeIdx(i);
+                    s = subStates{i};
+
+                    if isempty(s)
+                        nodeStates{globalID} = sprintf('C%d_ROOT', c);
+                    else
+                        str_s = sprintf('%d_', s);
+                        % Example state: "C1_2_1"
+                        nodeStates{globalID} = sprintf('C%d_%s', c, str_s(1:end-1));
+                    end
+                end
             end
-        end
-        
-        [~, ~, groupIDs] = unique(groupIDs);
-        numGroups = max(groupIDs);
-        
-        Q = graph();
-        Q = addnode(Q, numGroups);
-        
-        if numedges(G) > 0
-            u = groupIDs(G.Edges.EndNodes(:, 1));
-            v = groupIDs(G.Edges.EndNodes(:, 2));
-            vars = G.Edges.Variant;
-            
-            qEdges = [u, v];
-            qEdges = sort(qEdges, 2);
-            
-            strKeys = cell(size(qEdges, 1), 1);
-            for i = 1:size(qEdges, 1)
-                strKeys{i} = sprintf('%d_%d_%s', qEdges(i,1), qEdges(i,2), vars{i});
+
+            % 5. Group nodes that resolved to the exact same reduced word
+            [unqStates, ~, groupIDs] = unique(string(nodeStates));
+
+            % 6. Build the final Quotient Graph
+            numGroups = length(unqStates);
+            Q = graph();
+            Q = addnode(Q, numGroups);
+
+            if numedges(G) > 0
+                u = groupIDs(G.Edges.EndNodes(:, 1));
+                v = groupIDs(G.Edges.EndNodes(:, 2));
+                vars = G.Edges.Variant;
+
+                qEdges = [u, v];
+                qEdges = sort(qEdges, 2); % Standardize undirected edges
+
+                strKeys = cell(size(qEdges, 1), 1);
+                for i = 1:size(qEdges, 1)
+                    strKeys{i} = sprintf('%d_%d_%s', qEdges(i,1), qEdges(i,2), vars{i});
+                end
+
+                [~, unqIdx] = unique(strKeys);
+
+                % Filter out self-loops (edges where both nodes contract to the same group)
+                validEdges = qEdges(unqIdx, 1) ~= qEdges(unqIdx, 2);
+
+                EdgeT = table(qEdges(unqIdx(validEdges), :), vars(unqIdx(validEdges)), ...
+                    'VariableNames', {'EndNodes', 'Variant'});
+
+                if ~isempty(EdgeT)
+                    Q = addedge(Q, EdgeT);
+                end
             end
-            
-            [~, unqIdx] = unique(strKeys);
-            EdgeT = table(qEdges(unqIdx, :), vars(unqIdx), 'VariableNames', {'EndNodes', 'Variant'});
-            Q = addedge(Q, EdgeT);
+
+            obj.QuotientGraph = Q;
+            obj.nodeGroups = groupIDs;
+
+            mstG = graph();
+            mstG = addnode(mstG, numNodes);
+            if ~isempty(mstS)
+                if hasDeviation
+                    EdgeT = table([mstS, mstT], mstVar, mstDev, 'VariableNames', {'EndNodes', 'Variant', 'AngularDeviation'});
+                else
+                    EdgeT = table([mstS, mstT], mstVar, 'VariableNames', {'EndNodes', 'Variant'});
+                end
+                mstG = addedge(mstG, EdgeT);
+            end
+            obj.mstGraph = mstG;
         end
-        
-        obj.QuotientGraph = Q;
-        obj.nodeGroups = groupIDs;
+        function exportGraphData(obj, filename)
+            % Default filename if none is provided
+            if nargin < 2
+                filename = 'twinGraphData.json';
+            end
+
+            G = obj.Graph;
+            if isempty(G) || numnodes(G) == 0
+                warning('Graph is empty. Nothing to export.');
+                return;
+            end
+
+            % 1. Extract Node Data
+            numNodes = numnodes(G);
+            maxPhysId = max(obj.grains.id);
+
+            % Initialize a struct array for nodes
+            nodeData = struct('ID', cell(numNodes, 1), 'IsVirtual', cell(numNodes, 1));
+
+            for i = 1:numNodes
+                nodeData(i).ID = i;
+                % Any node ID greater than the max physical grain ID is a virtual sequence node
+                nodeData(i).IsVirtual = (i > maxPhysId);
+            end
+
+            % 2. Extract Edge Data
+            numEdgesG = numedges(G);
+            edgeData = struct('Source', cell(numEdgesG, 1), 'Target', cell(numEdgesG, 1));
+
+            hasVariant = ismember('Variant', G.Edges.Properties.VariableNames);
+            hasDeviation = ismember('AngularDeviation', G.Edges.Properties.VariableNames);
+
+            for i = 1:numEdgesG
+                edgeData(i).Source = G.Edges.EndNodes(i, 1);
+                edgeData(i).Target = G.Edges.EndNodes(i, 2);
+
+                if hasVariant
+                    edgeData(i).Variant = G.Edges.Variant{i};
+                end
+                if hasDeviation
+                    edgeData(i).AngularDeviation = G.Edges.AngularDeviation(i);
+                end
+            end
+
+            % 3. Package and Export
+            exportStruct = struct('Nodes', nodeData, 'Edges', edgeData);
+
+            % Convert to JSON string (PrettyPrint makes it highly readable)
+            jsonStr = jsonencode(exportStruct, 'PrettyPrint', true);
+
+            % Write to file
+            fid = fopen(filename, 'w');
+            if fid == -1
+                error('Could not open file for writing.');
+            end
+            fprintf(fid, '%s', jsonStr);
+            fclose(fid);
+
+            fprintf('Graph topology successfully exported to %s\n', filename);
+        end
     end
-end
+
 end
