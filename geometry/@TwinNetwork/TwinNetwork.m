@@ -6,12 +6,13 @@ classdef twinNetwork < handle
         maxGenerationLimit
         twinThresh
         Graph
-        GraphUndirected
+        untaggedGraph
         virtualNodes
         ebsd
         edgeData
+        QuotientGraph
+        nodeGroups
     end
-
     methods
         function obj = twinNetwork(grains, gB, tS, ebsd, varargin)
             obj.grains = grains;
@@ -305,7 +306,7 @@ classdef twinNetwork < handle
             
             numTotalNodes = vNodeIdx;
 
-        finalG = digraph();
+        finalG = graph();
         if numTotalNodes > 0
             finalG = addnode(finalG, numTotalNodes);
         end
@@ -316,7 +317,7 @@ classdef twinNetwork < handle
         end
 
         obj.Graph = finalG;
-        obj.GraphUndirected = G_undir;
+        obj.untaggedGraph = G_undir;
 
         if ~isempty(vNodeCoords)
             obj.virtualNodes = table(vNodeCoords(:,1), vNodeCoords(:,2), vNodeGens, 'VariableNames', {'x', 'y', 'Sequence'});
@@ -327,28 +328,33 @@ classdef twinNetwork < handle
 
     function plot(obj, varargin)
         p = inputParser;
-        addOptional(p, 'type', 'directed');
+        addOptional(p, 'type', 'tagged');
         parse(p, varargin{:});
         plotType = p.Results.type;
 
-        figure;
-        plot(obj.grains, 'micronbar', 'off');
-        hold on;
-
-        if strcmpi(plotType, 'undirected')
-            G = obj.GraphUndirected;
+        if strcmpi(plotType, 'untagged')
+            G = obj.untaggedGraph;
+        elseif strcmpi(plotType, 'quotient')
+            if isempty(obj.QuotientGraph)
+                obj.computeQuotientGraph();
+            end
+            G = obj.Graph;
         else
             G = obj.Graph;
         end
 
         if isempty(G) || numnodes(G) == 0
-            hold off;
+            warning('TwinNetwork:plot:emptyGraph', 'Graph is empty or non-existent.');
             return;
         end
 
-        numNodes = numnodes(G);
-        X = zeros(numNodes, 1);
-        Y = zeros(numNodes, 1);
+        figure;
+        plot(obj.grains, 'micronbar', 'off');
+        hold on;
+
+        numNodesG = numnodes(obj.Graph);
+        X_G = zeros(numNodesG, 1);
+        Y_G = zeros(numNodesG, 1);
 
         id2idx = zeros(max(obj.grains.id), 1);
         id2idx(obj.grains.id) = 1:length(obj.grains);
@@ -356,49 +362,144 @@ classdef twinNetwork < handle
         for i = 1:max(obj.grains.id)
             if id2idx(i) > 0
                 c = obj.grains(id2idx(i)).centroid;
-                X(i) = c.x;
-                Y(i) = c.y;
+                X_G(i) = c.x;
+                Y_G(i) = c.y;
             else
-                X(i) = NaN;
-                Y(i) = NaN;
+                X_G(i) = NaN;
+                Y_G(i) = NaN;
             end
         end
 
-        if strcmpi(plotType, 'directed') && ~isempty(obj.virtualNodes) && size(obj.virtualNodes, 1) > 0
+        if ~isempty(obj.virtualNodes) && size(obj.virtualNodes, 1) > 0
             vStart = max(obj.grains.id) + 1;
-            X(vStart:end) = obj.virtualNodes.x;
-            Y(vStart:end) = obj.virtualNodes.y;
+            X_G(vStart:end) = obj.virtualNodes.x;
+            Y_G(vStart:end) = obj.virtualNodes.y;
         end
 
-        p = plot(G, 'XData', X, 'YData', Y);
-        p.MarkerSize = 5;
-        p.NodeColor = 'k';
-        p.EdgeColor = 'k';
-        if strcmpi(plotType, 'directed')
-            p.ArrowSize = 10;
-        end
-        p.LineWidth = 1.5;
-
+        numPlotNodes = numnodes(G);
+        X_plot = X_G(1:numPlotNodes);
+        Y_plot = Y_G(1:numPlotNodes);
+        
+        pPlot = plot(G, 'XData', X_plot, 'YData', Y_plot);
+        pPlot.MarkerSize = 5;
+        pPlot.NodeColor = 'k';
+        pPlot.EdgeColor = 'k';
+        pPlot.LineWidth = 1.5;
+        
         if ismember('Variant', G.Edges.Properties.VariableNames)
-            labeledge(p, 1:numedges(G), G.Edges.Variant);
+            labeledge(pPlot, 1:numedges(G), G.Edges.Variant);
         end
-
-        if strcmpi(plotType, 'directed') && ~isempty(obj.virtualNodes) && size(obj.virtualNodes, 1) > 0
-            vIdx = (max(obj.grains.id) + 1):numNodes;
-            highlight(p, vIdx, 'NodeColor', 'r', 'Marker', 'o', 'MarkerSize', 8);
-        end
-
-        nodeLabels = cell(numNodes, 1);
-        for i = 1:numNodes
+        
+        nodeLabels = cell(numPlotNodes, 1);
+        for i = 1:numPlotNodes
             if i <= max(obj.grains.id) && id2idx(i) > 0
                 nodeLabels{i} = num2str(i);
             else
                 nodeLabels{i} = '';
             end
         end
-        p.NodeLabel = nodeLabels;
+        pPlot.NodeLabel = nodeLabels;
+
+        if strcmpi(plotType, 'quotient')
+            cmap = lines();
+            numCmap = size(cmap, 1);
+            
+            bins = conncomp(G);
+            for c = 1:max(bins)
+                nodesInComp = find(bins == c);
+                groupsInComp = unique(obj.nodeGroups(nodesInComp));
+                
+                for k = 1:length(groupsInComp)
+                    grp = groupsInComp(k);
+                    colorIdx = mod(k - 1, numCmap) + 1;
+                    nodesInThisGroup = nodesInComp(obj.nodeGroups(nodesInComp) == grp);
+                    
+                    highlight(pPlot, nodesInThisGroup, 'NodeColor', cmap(colorIdx, :), 'MarkerSize', 8, 'Marker', 's');
+                end
+            end
+        elseif strcmpi(plotType, 'tagged') && ~isempty(obj.virtualNodes) && size(obj.virtualNodes, 1) > 0
+            vIdx = (max(obj.grains.id) + 1):numPlotNodes;
+            highlight(pPlot, vIdx, 'NodeColor', 'r', 'Marker', 'o', 'MarkerSize', 8);
+        end
 
         hold off;
+    end
+    function [Q, groupIDs] = computeQuotientGraph(obj)
+        G = obj.Graph;
+        if isempty(G) || numnodes(G) == 0
+            Q = graph();
+            groupIDs = [];
+            obj.QuotientGraph = Q;
+            obj.nodeGroups = groupIDs;
+            return;
+        end
+        
+        numNodes = numnodes(G);
+        groupIDs = (1:numNodes)';
+        changed = true;
+        
+        while changed
+            changed = false;
+            u = groupIDs(G.Edges.EndNodes(:, 1));
+            v = groupIDs(G.Edges.EndNodes(:, 2));
+            vars = G.Edges.Variant;
+            
+            for i = 1:max(groupIDs)
+                idx_u = find(u == i);
+                idx_v = find(v == i);
+                
+                targets = [v(idx_u); u(idx_v)];
+                edgeVars = [vars(idx_u); vars(idx_v)];
+                
+                if isempty(targets)
+                    continue;
+                end
+                
+                [unqVars, ~, varIdx] = unique(edgeVars);
+                
+                for j = 1:length(unqVars)
+                    t = targets(varIdx == j);
+                    if length(t) > 1
+                        first_t = t(1);
+                        for k = 2:length(t)
+                            if groupIDs(t(k)) ~= groupIDs(first_t)
+                                old_g = groupIDs(t(k));
+                                new_g = groupIDs(first_t);
+                                groupIDs(groupIDs == old_g) = new_g;
+                                changed = true;
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        
+        [~, ~, groupIDs] = unique(groupIDs);
+        numGroups = max(groupIDs);
+        
+        Q = graph();
+        Q = addnode(Q, numGroups);
+        
+        if numedges(G) > 0
+            u = groupIDs(G.Edges.EndNodes(:, 1));
+            v = groupIDs(G.Edges.EndNodes(:, 2));
+            vars = G.Edges.Variant;
+            
+            qEdges = [u, v];
+            qEdges = sort(qEdges, 2);
+            
+            strKeys = cell(size(qEdges, 1), 1);
+            for i = 1:size(qEdges, 1)
+                strKeys{i} = sprintf('%d_%d_%s', qEdges(i,1), qEdges(i,2), vars{i});
+            end
+            
+            [~, unqIdx] = unique(strKeys);
+            EdgeT = table(qEdges(unqIdx, :), vars(unqIdx), 'VariableNames', {'EndNodes', 'Variant'});
+            Q = addedge(Q, EdgeT);
+        end
+        
+        obj.QuotientGraph = Q;
+        obj.nodeGroups = groupIDs;
     end
 end
 end

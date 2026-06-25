@@ -148,8 +148,11 @@ tSsym_ProperMios = -tSsym_mios;
 
 % 2. Initialize and run the TwinNetwork engine
 tN = twinNetwork(grains, gB, tS_1121, ebsd, 'twinThresh', 5*degree); %, 'detectDoubleTwins', true);
-tN.plot('type', 'directed')
-tN.plot('type', 'undirected')
+tN.plot('type', 'tagged')
+tN.plot('type', 'untagged')
+%% compute quotient
+tN.computeQuotientGraph()
+tN.plot('type', 'quotient')
 %% trials
 g1m = grains(1).meanOrientation %euler angle 89.91 79.2896 274.246 Re
 g2m = grains(2).meanOrientation %euler angle 55.4031 67.3501  283.38 Re
