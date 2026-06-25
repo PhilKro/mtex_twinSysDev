@@ -58,7 +58,8 @@ classdef twinNetwork < handle
 
                 repMori = currentMori(idx_rep);
                 newMori = variants(idx_repel);
-                nextMori = repMori(:) .* newMori(:);
+                nextMori = newMori(:) .* repMori(:);
+
 
                 allSeqs = [allSeqs; nextSeqs];
                 allMori = [allMori; nextMori];
@@ -214,24 +215,23 @@ classdef twinNetwork < handle
                         edgeProcessed(loc) = true;
 
                         % Determine directed variant sequence using dynamic boundary misorientation
-                        is_forward = currNode < nxtNode;
-                        warning('Are boundaries always defined from the grain with the smaller id to the larger id? this implies that i think')
-                        
                         pairIdxs = find(pairTags == loc);
+                        firstIdx = pairIdxs(1);
                         
                         ebsd1ori = mean(obj.edgeData.meanEbsdOri1(pairIdxs));
                         ebsd2ori = mean(obj.edgeData.meanEbsdOri2(pairIdxs));
                         
-                        % m_boundary = mean(obj.edgeData.misorientation(pairIdxs));
-                        % % MTEX boundary misorientation typically goes from grainId(2) to grainId(1)
-                        % if is_forward
-                        %     mori_directed = inv(m_boundary);
-                        % else
-                        %     mori_directed = m_boundary;
-                        % end
-                        % angList = angle(mori_directed, allMori(:)', 'noSym1');
+                        % Rigorously determine which orientation belongs to currNode (parent)
+                        if obj.edgeData.grainId(firstIdx, 1) == currNode
+                            currOri = ebsd1ori;
+                            nxtOri  = ebsd2ori;
+                        else
+                            currOri = ebsd2ori;
+                            nxtOri  = ebsd1ori;
+                        end
                         
-                        angList = angle(ebsd2ori*allMori, ebsd1ori);
+                        % Direct orientation angle evaluation (Angle between nxtOri and currOri * variant)
+                        angList = angle(nxtOri, currOri * allMori(:)');
                  
                         angList = angList(:);
                         validMatches = angList < obj.twinThresh;
@@ -249,18 +249,9 @@ classdef twinNetwork < handle
                         end
                         
                         if is_newly_visited
-                            % Fetch current parent orientation from edgeData
-                            idx_curr1 = find(obj.edgeData.grainId(:,1) == currNode, 1);
-                            if ~isempty(idx_curr1)
-                                parentOri = obj.edgeData.grainOri1(idx_curr1);
-                            else
-                                idx_curr2 = find(obj.edgeData.grainId(:,2) == currNode, 1);
-                                parentOri = obj.edgeData.grainOri2(idx_curr2);
-                            end
-                            
-                            % Calculate target fundamental region center
+                            % Calculate target fundamental region center based purely on the newly matched variant
                             variant_mori = allMori(minMoriIdx);
-                            center_ori = parentOri * variant_mori;
+                            center_ori = currOri * variant_mori;
                             
                             % Find all boundary segments containing nxtNode
                             idx1 = obj.edgeData.grainId(:,1) == nxtNode;

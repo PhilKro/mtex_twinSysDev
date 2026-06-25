@@ -50,12 +50,13 @@ ebsd0=ebsd;
 %% Crop EBSD Data
 % Define your rectangular region: [xmin, ymin, width, height]
 % uncomment the lines below to apply the crop
-region = [-6.5, -5.7, 0.8, 0.8]; 
-ebsd = ebsd(inpolygon(ebsd, region));
-ebsd0 = ebsd;
-
-ebsd=ebsd.gridify;
-ebsd0=ebsd0.gridify;
+% region = [-6.5, -5.7, 0.8, 0.8]; 
+% region = [-4.9, -6.2, 0.6, 0.8]; 
+% ebsd = ebsd(inpolygon(ebsd, region));
+% ebsd0 = ebsd;
+% 
+% ebsd=ebsd.gridify;
+% ebsd0=ebsd0.gridify;
 %% some initial test plot %%%
 
 ipf=ipfColorKey(ebsd.CS);
@@ -99,7 +100,7 @@ title('IPF Y')
 % min angle used for grain reconstruction
 grainThresh = 8*degree; %BRANDON CRITERIA, significance 15°/sqrt(Σ); Σ being the CSL number https://link.springer.com/article/10.1007/s10853-006-0665-8
 % min grainsize, in pixels
-minSize = 40;
+minSize = 10;
 % aplha parameters, defines how much to fill during recons
 % truction
 alpha = 2;
@@ -153,18 +154,7 @@ tN.plot('type', 'undirected')
 g1m = grains(1).meanOrientation %euler angle 89.91 79.2896 274.246 Re
 g2m = grains(2).meanOrientation %euler angle 55.4031 67.3501  283.38 Re
 g3m = grains(3).meanOrientation %euler angle 89.906 79.4288 272.717 Re
-mori12 = inv(g1m)*g2m
 
-g1m * mori12 % equals grains2 meanOri
-g2m
-%%
-angle(tSsym_mios, mori12,'noSym1')/degree % both times its variant 5
-angle(tSsym_ProperMios, mori12,'noSym1')/degree % both times its variant 5
-%%
-g1m * tSsym_mios(5)
-g1m * tSsym_ProperMios(5)
-g2m
-%%
 g1m*tSsym_mios
 g1m*tSsym_ProperMios
 angle(g2m, g1m*tSsym_ProperMios)/degree %the 1th variant is lowest angle
@@ -173,6 +163,4 @@ angle(ideal_g2m, g2m)
 angle(g3m, ideal_g2m*tSsym_ProperMios)/degree % the 1st variant is again the lowest
 ideal_g3m = g3m.project2FundamentalRegion(ideal_g2m*tSsym_ProperMios(1))
 angle(ideal_g3m, g3m)
-% my logi is sound
-
-%
+% my logic is sound
