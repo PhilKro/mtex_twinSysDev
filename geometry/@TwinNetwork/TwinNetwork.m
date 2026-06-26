@@ -344,13 +344,14 @@ classdef twinNetwork < handle
                 G = obj.untaggedGraph;
             elseif strcmpi(plotType, 'mst')
                 if isempty(obj.mstGraph)
-                    warning('TwinNetwork:plot:emptyMST', 'MST is empty. Computing quotient graph first.');
-                    obj.computeQuotientGraph();
+                    warning('TwinNetwork:plotGraph:emptyMST', 'MST is empty. Compute the quotient graph first.');
+                    return
                 end
                 G = obj.mstGraph;
             elseif strcmpi(plotType, 'quotient')
                 if isempty(obj.QuotientGraph)
-                    obj.computeQuotientGraph();
+                    warning('TwinNetwork:plotGraph:emptyQuotient', 'Quotient is empty. Compute the quotient graph first.');
+                    return
                 end
                 G = obj.Graph;
             else
@@ -566,8 +567,8 @@ classdef twinNetwork < handle
             criterion = p.Results.criterion;
             
             if isempty(obj.QuotientGraph)
-                warning('TwinNetwork:identifyParents:emptyQuotient', 'QuotientGraph is empty. Computing quotient graph first.');
-                obj.computeQuotientGraph();
+                warning('TwinNetwork:identifyParents:emptyQuotient', 'QuotientGraph is empty. Compute quotient graph first.');
+                return
             end
             
             Q = obj.QuotientGraph;
@@ -646,6 +647,75 @@ classdef twinNetwork < handle
                             obj.groupVariantPaths{nxtGroup} = [currPath, variantNum];
                             
                             queue(end+1) = nxtGroup;
+                        end
+                    end
+                end
+            end
+        end
+        function SF = calcSF(obj, sigma)
+            if ~isa(sigma, 'stressTensor')
+                error('TwinNetwork:calcSF:invalidInput', 'Input must be a stressTensor object.');
+            end
+            
+            warning('TwinNetwork:calcSF:primaryOnly', 'This method currently only supports primary twins.');
+            
+            if isempty(obj.groupGenerations)
+                error('TwinNetwork:calcSF:noParents', 'Parent identification not run. Please call identifyParents() first.');
+            end
+            
+            tS_sym = obj.tS.symmetrise;
+            variants = tS_sym.parentTwinMisorientation;
+            if variants.isImproper
+                variants = -variants;
+            end
+            
+            numGrains = length(obj.grains);
+            SF = nan(numGrains, 1);
+            
+            maxPhysId = max(obj.grains.id);
+            id2idx = zeros(maxPhysId, 1);
+            id2idx(obj.grains.id) = 1:numGrains;
+            
+            numNodesInG = length(obj.nodeGroups);
+            maxPhysIdSafe = min(maxPhysId, numNodesInG);
+            physNodeGroups = obj.nodeGroups(1:maxPhysIdSafe);
+            
+            for i = 1:maxPhysIdSafe
+                idx = id2idx(i);
+                if idx > 0
+                    g = physNodeGroups(i);
+                    if g > 0 && g <= length(obj.groupGenerations) && ~isnan(obj.groupGenerations(g))
+                        gen = obj.groupGenerations(g);
+                        if gen == 1
+                            % Primary twin
+                            path = obj.groupVariantPaths{g};
+                            V = path(1);
+                            
+                            % Find corrected grain orientation
+                            edgeIdx1 = find(obj.edgeData.grainId(:, 1) == i, 1);
+                            edgeIdx2 = find(obj.edgeData.grainId(:, 2) == i, 1);
+                            
+                            if ~isempty(edgeIdx1)
+                                correctedTwinOri = obj.edgeData.grainOri1(edgeIdx1);
+                            elseif ~isempty(edgeIdx2)
+                                correctedTwinOri = obj.edgeData.grainOri2(edgeIdx2);
+                            else
+                                correctedTwinOri = obj.grains(idx).meanOrientation; % fallback
+                            end
+                            
+                            variant_mori = variants(V);
+                            
+                            % Virtual parent
+                            virtualParentOri = correctedTwinOri * inv(variant_mori);
+                            
+                            % Transform stress tensor to virtual parent crystal coordinates
+                            sigma_crystal = inv(virtualParentOri) * sigma;
+                            
+                            % Calculate SF for all variants
+                            sf_all = SchmidFactor(tS_sym, sigma_crystal);
+                            
+                            % Extract the SF for this specific variant
+                            SF(idx) = sf_all(V);
                         end
                     end
                 end
@@ -839,6 +909,7 @@ classdef twinNetwork < handle
                 mstG = addedge(mstG, EdgeT);
             end
             obj.mstGraph = mstG;
+        warning('TwinNetwork:computeQuotientGraph:sanityCheck','Here we can introduce a sanity check, via grain orientation, we check for every group in the quotient graph if there are significant outliers (>15°) and then see if any other edges attached to these outliers allows for a different grouping, for which the orientation gets checked again. If non of the edges allow for a more fitting grouping, the original grouping in the quotient graph is kept and a warning is displayed. If a more fitting grouping is found (all groupings have to be possible in the tagged graph, the orinentation is only the backcheck not the source of the grouping), then this node gets moved to another group in the quotient and the necessary edge-edits will be made in the MST')
         end
         function exportGraphData(obj, filename)
             % Default filename if none is provided
