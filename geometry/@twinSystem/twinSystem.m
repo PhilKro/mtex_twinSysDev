@@ -144,13 +144,27 @@ classdef twinSystem
             shearMagnitude = norm(shearvector);
         end
         
-        function defTensor = displacementGradient(tS)
+        function defTensor = displacementGradient(tS, varargin)
+            % DISPLACEMENTGRADIENT Calculates the displacement gradient (deformation tensor) of the twin
+            %
+            % Syntax
+            %   defTensor = displacementGradient(tS)
+            %   defTensor = displacementGradient(tS, 'crystalCoords')
+            %
+            % Description
+            %   Calculates the local deformation tensor. If the twin object is attached 
+            %   to a parent with a defined orientation (e.g., grain2d or orientation), 
+            %   the tensor is returned in specimen coordinates. Pass 'crystalCoords' 
+            %   to force the output to remain in the crystal reference frame.
+            
+            crystalCoordsFlag = any(strcmpi(varargin, 'crystalCoords'));
+            
             warning('twinSystem:displacementGradient:deprecated', 'Hopefully displacementGradient handles recursive twin objects correctly.')
             % 1. Calculate the local deformation tensor in the parent crystal reference frame
             defTensor = tS.shearMagnitude .* dyad(tS.eta1, tS.k1).normalize;
 
-            % 2. If no parent is attached, return the tensor in crystal coordinates
-            if isempty(tS.parent) || all(cellfun('isempty', {tS.parent}))
+            % 2. If no parent is attached or crystal coords explicitly requested, return the tensor in crystal coordinates
+            if crystalCoordsFlag || isempty(tS.parent) || all(cellfun('isempty', {tS.parent}))
                 return;
             end
 
@@ -245,7 +259,7 @@ classdef twinSystem
                 if tS.eta1.lattice.isTriHex
                     
                     c = tS.CS.cAxis;
-                    delta_c = tS.displacementGradient * c;
+                    delta_c = tS.displacementGradient('crystalCoords') * c;
                     val = dot(c, delta_c);
 
                     
@@ -548,46 +562,46 @@ classdef twinSystem
             assert(dot(shearvec, tS.eta1, 'noSymmetry') > 0, "Something went wrong in the definition of the twin system: eta1 has the wrong sense. Sense of shear will not be correct")
         end
 
-        function tS = byK1rotAxis(k1, rotAxis, type)
-            error('twinSystem:byK1rotAxis:deprecated',"This method is not fully implemented yet. Use byK1eta2 or byK2eta1 instead for now.")
-            if nargin < 3, type = 2; end
-            if dot(k1, rotAxis, 'noSymmetry') < 1.00e-012
-                eta1 = cross(k1, rotAxis);
-                if eq(eta1.CS.lattice, latticeType.hexagonal)
-                    eta1.dispStyle = 'UVTW';
-                else
-                    eta1.dispStyle = 'uvw';
-                end
-                k2 = eta1;
-                if eq(eta1.CS.lattice, latticeType.hexagonal)
-                    k2.dispStyle = 'hkil';
-                else
-                    k2.dispStyle = 'hkl';
-                end
-                eta2 = k1;
-                eta2.dispStyle = 'UVTW';
-                disp(append(newline, 'Chose a set of values for K2 and eta2!'))
-                tS = twinSystem(rotAxis, k1, eta1, k2, eta2, 1, type);
-            else
-                error("k1 and rotAxis have to be orthogonal")
-            end
-        end
+        % function tS = byK1rotAxis(k1, rotAxis, type)
+        %     error('twinSystem:byK1rotAxis:deprecated',"This method is not fully implemented yet. Use byK1eta2 or byK2eta1 instead for now.")
+        %     if nargin < 3, type = 2; end
+        %     if dot(k1, rotAxis, 'noSymmetry') < 1.00e-012
+        %         eta1 = cross(k1, rotAxis);
+        %         if eq(eta1.CS.lattice, latticeType.hexagonal)
+        %             eta1.dispStyle = 'UVTW';
+        %         else
+        %             eta1.dispStyle = 'uvw';
+        %         end
+        %         k2 = eta1;
+        %         if eq(eta1.CS.lattice, latticeType.hexagonal)
+        %             k2.dispStyle = 'hkil';
+        %         else
+        %             k2.dispStyle = 'hkl';
+        %         end
+        %         eta2 = k1;
+        %         eta2.dispStyle = 'UVTW';
+        %         disp(append(newline, 'Chose a set of values for K2 and eta2!'))
+        %         tS = twinSystem(rotAxis, k1, eta1, k2, eta2, 1, type);
+        %     else
+        %         error("k1 and rotAxis have to be orthogonal")
+        %     end
+        % end
 
-        function tS = hexagonal_110K(K, CS)
-            if CS.lattice.isTriHex
-                tS = arrayfun(@(x_int) twinSystem.byK1rotAxis(Miller({1, 0, -1, x_int}, CS), Miller({1, -2, 1, 0}, CS, 'UVTW'), 2), K);
-            else
-                disp("Provide a hexagonal CS for this method")
-            end
-        end
-
-        function tS = hexagonal_211K(K, CS)
-            if CS.lattice.isTriHex
-                tS = arrayfun(@(x_int) twinSystem.byK1rotAxis(Miller({1, 1, -2, x_int}, CS), Miller({1, -1, 0, 0}, CS, 'UVTW'), 2), K);
-            else
-                disp("Provide a hexagonal CS for this method")
-            end
-        end
+        % function tS = hexagonal_110K(K, CS)
+        %     if CS.lattice.isTriHex
+        %         tS = arrayfun(@(x_int) twinSystem.byK1rotAxis(Miller({1, 0, -1, x_int}, CS), Miller({1, -2, 1, 0}, CS, 'UVTW'), 2), K);
+        %     else
+        %         disp("Provide a hexagonal CS for this method")
+        %     end
+        % end
+        % 
+        % function tS = hexagonal_211K(K, CS)
+        %     if CS.lattice.isTriHex
+        %         tS = arrayfun(@(x_int) twinSystem.byK1rotAxis(Miller({1, 1, -2, x_int}, CS), Miller({1, -1, 0, 0}, CS, 'UVTW'), 2), K);
+        %     else
+        %         disp("Provide a hexagonal CS for this method")
+        %     end
+        % end
 
         function tS = hexagonal_1012(CS)
             if CS.lattice.isTriHex
@@ -598,17 +612,64 @@ classdef twinSystem
             end
         end
 
-        function tS = hexagonal_1101(CS)
+        function tS = hexagonal_2241(CS)
+            if CS.lattice.isTriHex
+                tS = twinSystem.calculateTheoreticalTwins(CS,Miller(2,2,-4,1,CS),2);
+                if ~isempty(tS), idx = find(tS.twinType == 0, 1); if ~isempty(idx), tS = tS.select(idx); else, tS = twinSystem.empty; end; end
+            else
+                disp("Provide a hexagonal CS for this method")
+            end
+        end
+
+        function tS = hexagonal_1011(CS)
             if CS.lattice.isTriHex
                 tS = twinSystem.calculateTheoreticalTwins(CS,Miller(1,0,-1,1,CS),4);
-                if ~isempty(tS)
-                    idx = find(tS.twinType == 0, 1);
-                    if ~isempty(idx)
-                        tS = tS.select(idx); 
-                    else
-                        tS = twinSystem.empty; 
-                    end
-                end
+                if ~isempty(tS), idx = find(tS.twinType == 0, 1); if ~isempty(idx), tS = tS.select(idx); else, tS = twinSystem.empty; end; end
+            else
+                disp("Provide a hexagonal CS for this method")
+            end
+        end
+
+        function tS = hexagonal_1011_TypeI(CS)
+            if CS.lattice.isTriHex
+                tS = twinSystem.calculateTheoreticalTwins(CS,Miller(1,0,-1,1,CS),2);
+                if ~isempty(tS), idx = find(tS.twinType == 1, 1); if ~isempty(idx), tS = tS.select(idx); else, tS = twinSystem.empty; end; end
+            else
+                disp("Provide a hexagonal CS for this method")
+            end
+        end
+
+        function tS = hexagonal_2021(CS)
+            if CS.lattice.isTriHex
+                tS = twinSystem.calculateTheoreticalTwins(CS,Miller(2,0,-2,1,CS),2);
+                if ~isempty(tS), idx = find(tS.twinType == 0, 1); if ~isempty(idx), tS = tS.select(idx); else, tS = twinSystem.empty; end; end
+            else
+                disp("Provide a hexagonal CS for this method")
+            end
+        end
+        
+        function tS = hexagonal_1121(CS)
+            if CS.lattice.isTriHex
+                tS = twinSystem.calculateTheoreticalTwins(CS,Miller(1,1,-2,1,CS),1);
+                if ~isempty(tS), idx = find(tS.twinType == 0, 1); if ~isempty(idx), tS = tS.select(idx); else, tS = twinSystem.empty; end; end
+            else
+                disp("Provide a hexagonal CS for this method")
+            end
+        end
+
+        function tS = hexagonal_1013(CS)
+            if CS.lattice.isTriHex
+                tS = twinSystem.calculateTheoreticalTwins(CS,Miller(1,0,-1,3,CS),4);
+                if ~isempty(tS), idx = find(tS.twinType == 0, 1); if ~isempty(idx), tS = tS.select(idx); else, tS = twinSystem.empty; end; end
+            else
+                disp("Provide a hexagonal CS for this method")
+            end
+        end
+
+        function tS = hexagonal_1013_TypeI(CS)
+            if CS.lattice.isTriHex
+                tS = twinSystem.calculateTheoreticalTwins(CS,Miller(1,0,-1,3,CS),2);
+                if ~isempty(tS), idx = find(tS.twinType == 1, 1); if ~isempty(idx), tS = tS.select(idx); else, tS = twinSystem.empty; end; end
             else
                 disp("Provide a hexagonal CS for this method")
             end
@@ -631,13 +692,14 @@ classdef twinSystem
                 disp("Provide a hexagonal CS for this method")
             end
         end
-
-        function tS = hexagonal_1121(CS)
-            if CS.lattice.isTriHex
-                tS = twinSystem.calculateTheoreticalTwins(CS,Miller(1,1,-2,1,CS),1);
+        
+        function tS = bct_101(CS)
+            % classic fcc {111}<112> twin system
+            if eq(CS.lattice, latticeType.tetragonal)
+                tS = twinSystem.calculateTheoreticalTwins(CS, Miller(1,0,1,CS,'hkl'), 4, 'BCC');
                 if ~isempty(tS), idx = find(tS.twinType == 0, 1); if ~isempty(idx), tS = tS.select(idx); else, tS = twinSystem.empty; end; end
             else
-                disp("Provide a hexagonal CS for this method")
+                disp("Provide a tetragonal CS for this method")
             end
         end
 
