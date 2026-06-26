@@ -63,6 +63,7 @@ classdef twinNetwork < handle
                 repMori = currentMori(idx_rep);
                 newMori = variants(idx_repel);
                 nextMori = newMori(:) .* repMori(:);
+                warning('twinNetwork:twinNetwork:moriConfusion','This feels like the wrong way round, but like this the variant order along the virtual edges seems correct. I expected nextMori = repMori(:) .* newMori(:); however then its flipped, but should be correct since its ori*mori1*mori2 and not ori*mori2*mori1. I dont understand.')
 
 
                 allSeqs = [allSeqs; nextSeqs];
@@ -176,7 +177,7 @@ classdef twinNetwork < handle
             vNodeIdx = numPhysNodes;
             vNodeCoords = [];
             vNodeGens = {};
-            warning('Maybe start the graph from the grain with the lowest GROD to size ratio? or sth similar')
+            warning('twinNetwork:twinNetwork:initialGrainErrorReduction','Maybe start the graph from the grain with the lowest GROD to size ratio? or sth similar')
             for c = 1:max(bins)
                 compNodes = find(bins == c);
                 if length(compNodes) == 1
@@ -344,13 +345,13 @@ classdef twinNetwork < handle
                 G = obj.untaggedGraph;
             elseif strcmpi(plotType, 'mst')
                 if isempty(obj.mstGraph)
-                    warning('TwinNetwork:plotGraph:emptyMST', 'MST is empty. Compute the quotient graph first.');
+                    warning('twinNetwork:plotGraph:emptyMST', 'MST is empty. Compute the quotient graph first.');
                     return
                 end
                 G = obj.mstGraph;
             elseif strcmpi(plotType, 'quotient')
                 if isempty(obj.QuotientGraph)
-                    warning('TwinNetwork:plotGraph:emptyQuotient', 'Quotient is empty. Compute the quotient graph first.');
+                    warning('twinNetwork:plotGraph:emptyQuotient', 'Quotient is empty. Compute the quotient graph first.');
                     return
                 end
                 G = obj.Graph;

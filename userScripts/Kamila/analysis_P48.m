@@ -9,10 +9,10 @@ plottingConvention.default.east = xvector;
 plottingConvention.default.outOfScreen = -zvector;
 
 % filename
-dir = 'userScripts/Kamila';
-file = 'Sample48 Site 3 Map Data 6_Map_Data_6_CircMask_EntireMap_NoGB_BW158.ang';
-% dir = 'onedriveData/Kamila';
-% file = 'pillar29 Specimen 3 Site 1 Map Data 3_BW158.ang';
+% dir = 'userScripts/Kamila';
+% file = 'Sample48 Site 3 Map Data 6_Map_Data_6_CircMask_EntireMap_NoGB_BW158.ang';
+dir = 'onedriveData/Kamila';
+file = 'pillar29 Specimen 3 Site 1 Map Data 3_BW158.ang';
 
 path = fullfile(dir, file);
 [~, baseName, ~] = fileparts(file);
@@ -144,16 +144,16 @@ tS_sym = tS_1121.symmetrise;
 
 % 2. Initialize and run the TwinNetwork engine
 tN = twinNetwork(grains, gB, tS_1121, ebsd, 'twinThresh', 3*degree); %, 'detectDoubleTwins', true);
-% tN.plotGraph('type', 'tagged')
-% exportScaledFigure(gcf, fullfile(dir, [baseName, '_tagged_graph.png']))
+tN.plotGraph('type', 'tagged')
+exportScaledFigure(gcf, fullfile(dir, [baseName, '_tagged_graph.png']))
 
-% tN.plotGraph('type', 'untagged')
-% exportScaledFigure(gcf, fullfile(dir, [baseName, '_untagged_graph.png']))
+tN.plotGraph('type', 'untagged')
+exportScaledFigure(gcf, fullfile(dir, [baseName, '_untagged_graph.png']))
 
 %% compute quotient
 tN.computeQuotientGraph()
-% tN.plotGraph('type', 'quotient')
-% exportScaledFigure(gcf, fullfile(dir, [baseName, '_quotient_graph.png']))
+tN.plotGraph('type', 'quotient')
+exportScaledFigure(gcf, fullfile(dir, [baseName, '_quotient_graph.png']))
 
 tN.plotGraph('type', 'mst')
 exportScaledFigure(gcf, fullfile(dir, [baseName, '_mst_graph.jpg']), 'target_px', 4000, 'noDateString')
@@ -193,8 +193,10 @@ writetable(T, csvPath);
 fprintf('Successfully exported plots and saved SF data to %s\n', csvPath);
 
 %% use grain 31 of P48 as reference start orientation to compute ideal SFs
+% startOri = grains(31).meanOrientation;
+% use grain 8 of P29 as a reference start orientation
+startOri = grains(8).meanOrientation;
 
-startOri = grains(31).meanOrientation;
 sigma_crystal = inv(startOri)*stressState;
 sf_all = SchmidFactor(tS_sym, sigma_crystal);
 % print as a nice table with variants and SFs
