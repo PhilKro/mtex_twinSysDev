@@ -722,7 +722,12 @@ classdef twinNetwork < handle
                 end
             end
         end
-        function [Q, groupIDs] = computeQuotientGraph(obj)
+        function [Q, groupIDs] = computeQuotientGraph(obj, varargin)
+            p = inputParser;
+            addParameter(p, 'stable', false, @islogical);
+            parse(p, varargin{:});
+            stable = p.Results.stable;
+
             G = obj.Graph;
             if isempty(G) || numnodes(G) == 0
                 Q = graph();
@@ -733,15 +738,19 @@ classdef twinNetwork < handle
             end
 
             numNodes = numnodes(G);
-            groupIDs = zeros(numNodes, 1);
+            maxPhysId = max(obj.grains.id);
+            id2idx = zeros(maxPhysId, 1);
+            id2idx(obj.grains.id) = 1:length(obj.grains);
 
-            % Store the "reduced word" state for every node
-            nodeStates = cell(numNodes, 1);
+            tS_sym = obj.tS.symmetrise;
+            variants = tS_sym.parentTwinMisorientation;
+            if variants.isImproper, variants = -variants; end
+            outlierThresh = 15 * degree;
 
-            % Isolate connected components
             bins = conncomp(G);
             numComps = max(bins);
 
+            % Step 1: Initial MST construction
             mstS = [];
             mstT = [];
             mstVar = {};
@@ -751,17 +760,13 @@ classdef twinNetwork < handle
             for c = 1:numComps
                 compNodeIdx = find(bins == c);
                 compNodeIdx = compNodeIdx(:);
-
-                % Base case for isolated nodes
                 if length(compNodeIdx) == 1
-                    nodeStates{compNodeIdx(1)} = sprintf('C%d_ROOT', c);
                     continue;
                 end
 
                 subG = subgraph(G, compNodeIdx);
 
-                % 1. Create Minimum Spanning Tree to avoid spurious cycles
-                if ismember('AngularDeviation', subG.Edges.Properties.VariableNames)
+                if hasDeviation
                     subG.Edges.Weight = subG.Edges.AngularDeviation;
                 else
                     warning('TwinNetwork:computeQuotientGraph:noWeight', ...
@@ -769,27 +774,15 @@ classdef twinNetwork < handle
                     subG.Edges.Weight = ones(numedges(subG), 1);
                 end
 
-            % VIRTUAL NODE PENALTY
-            % Virtual nodes are defined as having an ID greater than the max physical grain ID
-            maxPhysId = max(obj.grains.id);
-            
-            % compNodeIdx maps the local subG nodes to their global G IDs
-            virtualLocalIdx = find(compNodeIdx > maxPhysId); 
-            
-            if ~isempty(virtualLocalIdx)
-                % Extract all edge endpoints in the current subgraph
-                endNodes = subG.Edges.EndNodes;
+                virtualLocalIdx = find(compNodeIdx > maxPhysId); 
+                if ~isempty(virtualLocalIdx)
+                    endNodes = subG.Edges.EndNodes;
+                    virtualEdges = find(ismember(endNodes(:, 1), virtualLocalIdx) | ...
+                                        ismember(endNodes(:, 2), virtualLocalIdx));
+                    virtualPenalty = 1000; 
+                    subG.Edges.Weight(virtualEdges) = subG.Edges.Weight(virtualEdges) + virtualPenalty;
+                end
                 
-                % Find any edge where either the source OR the target is a virtual node
-                virtualEdges = find(ismember(endNodes(:, 1), virtualLocalIdx) | ...
-                                    ismember(endNodes(:, 2), virtualLocalIdx));
-                
-                % Add a massive penalty to these edges
-                virtualPenalty = 1000; 
-                subG.Edges.Weight(virtualEdges) = subG.Edges.Weight(virtualEdges) + virtualPenalty;
-            end
-            
-                % Compute the MST (it will use subG.Edges.Weight if we just created it)
                 [subMST, ~] = minspantree(subG);
 
                 if numedges(subMST) > 0
@@ -802,70 +795,189 @@ classdef twinNetwork < handle
                         mstDev = [mstDev; subMST.Edges.AngularDeviation];
                     end
                 end
+            end
 
-                % 2. Breadth-First Search to assign algebraic states
-                rootNode = 1;
+            mstG = graph();
+            mstG = addnode(mstG, numNodes);
+            if ~isempty(mstS)
+                if hasDeviation
+                    EdgeT = table([mstS, mstT], mstVar, mstDev, 'VariableNames', {'EndNodes', 'Variant', 'AngularDeviation'});
+                else
+                    EdgeT = table([mstS, mstT], mstVar, 'VariableNames', {'EndNodes', 'Variant'});
+                end
+                mstG = addedge(mstG, EdgeT);
+            end
 
-                subStates = cell(numnodes(subMST), 1);
-                subStates{rootNode} = []; % The identity state
-
-                visited = false(numnodes(subMST), 1);
-                visited(rootNode) = true;
-
-                queue = rootNode;
-
-                while ~isempty(queue)
-                    currNode = queue(1);
-                    queue(1) = [];
-
-                    currState = subStates{currNode};
-
-                    nbrs = neighbors(subMST, currNode);
-                    for n = 1:length(nbrs)
-                        nxtNode = nbrs(n);
-                        if ~visited(nxtNode)
-                            visited(nxtNode) = true;
-
-                            % Find the edge variant in the MST
-                            edgeIdx = findedge(subMST, currNode, nxtNode);
-                            v_str = subMST.Edges.Variant{edgeIdx};
-                            v_num = str2double(v_str);
-
-                            % 3. The Algebraic Contraction Rule
-                            nxtState = currState;
-                            if ~isempty(nxtState) && nxtState(end) == v_num
-                                % Identical adjacent variants contract (cancel out)
-                                nxtState(end) = [];
-                            else
-                                % Otherwise, append to the sequence
-                                nxtState(end+1) = v_num;
+            % Step 2: Global Refinement Loop
+            maxIters = stable * 5 + 1;
+            nodeStates = cell(numNodes, 1);
+            groupIDs = zeros(numNodes, 1);
+            
+            for iter = 1:maxIters
+                parentNode = zeros(numNodes, 1);
+                
+                for c = 1:numComps
+                    compNodeIdx = find(bins == c);
+                    compNodeIdx = compNodeIdx(:);
+                    if length(compNodeIdx) == 1
+                        nodeStates{compNodeIdx(1)} = sprintf('C%d_ROOT', c);
+                        continue;
+                    end
+                    
+                    physNodes = compNodeIdx(compNodeIdx <= maxPhysId);
+                    validNodes = physNodes(id2idx(physNodes) > 0);
+                    if ~isempty(validNodes)
+                        areas = obj.grains(id2idx(validNodes)).area;
+                        [~, maxAreaIdx] = max(areas);
+                        rootNode = validNodes(maxAreaIdx);
+                    else
+                        rootNode = compNodeIdx(1);
+                    end
+                    
+                    nodeStates{rootNode} = sprintf('C%d_ROOT', c);
+                    
+                    subStates = cell(numNodes, 1);
+                    subStates{rootNode} = [];
+                    
+                    visited = false(numNodes, 1);
+                    visited(rootNode) = true;
+                    
+                    queue = rootNode;
+                    
+                    while ~isempty(queue)
+                        currNode = queue(1);
+                        queue(1) = [];
+                        
+                        currState = subStates{currNode};
+                        
+                        nbrs = neighbors(mstG, currNode);
+                        for n = 1:length(nbrs)
+                            nxtNode = nbrs(n);
+                            if bins(nxtNode) == c && ~visited(nxtNode)
+                                visited(nxtNode) = true;
+                                parentNode(nxtNode) = currNode;
+                                
+                                edgeIdx = findedge(mstG, currNode, nxtNode);
+                                v_num = str2double(mstG.Edges.Variant{edgeIdx});
+                                
+                                nxtState = currState;
+                                if ~isempty(nxtState) && nxtState(end) == v_num
+                                    nxtState(end) = [];
+                                else
+                                    nxtState(end+1) = v_num;
+                                end
+                                
+                                subStates{nxtNode} = nxtState;
+                                
+                                if isempty(nxtState)
+                                    nodeStates{nxtNode} = sprintf('C%d_ROOT', c);
+                                else
+                                    str_s = sprintf('%d_', nxtState);
+                                    nodeStates{nxtNode} = sprintf('C%d_%s', c, str_s(1:end-1));
+                                end
+                                
+                                queue(end+1) = nxtNode;
                             end
-
-                            subStates{nxtNode} = nxtState;
-                            queue(end+1) = nxtNode;
                         end
                     end
                 end
-
-                % 4. Convert numeric arrays to strings for unique grouping
-                for i = 1:length(compNodeIdx)
-                    globalID = compNodeIdx(i);
-                    s = subStates{i};
-
-                    if isempty(s)
-                        nodeStates{globalID} = sprintf('C%d_ROOT', c);
-                    else
-                        str_s = sprintf('%d_', s);
-                        % Example state: "C1_2_1"
-                        nodeStates{globalID} = sprintf('C%d_%s', c, str_s(1:end-1));
+                
+                [unqStates, ~, groupIDs] = unique(string(nodeStates));
+                
+                changed = false;
+                if stable
+                    for g = 1:length(unqStates)
+                        g_nodes = find(groupIDs == g);
+                        phys_g_nodes = g_nodes(g_nodes <= maxPhysId);
+                        valid_phys = phys_g_nodes(id2idx(phys_g_nodes) > 0);
+                        
+                        if length(valid_phys) <= 1
+                            continue;
+                        end
+                        
+                        oris = obj.grains(id2idx(valid_phys)).meanOrientation;
+                        grp_areas = obj.grains(id2idx(valid_phys)).area;
+                        [~, maxAreaIdxLocal] = max(grp_areas);
+                        ref_ori = oris(maxAreaIdxLocal);
+                        ref_node = valid_phys(maxAreaIdxLocal);
+                        
+                        devs = angle(oris, ref_ori);
+                        outlier_idx = find(devs > outlierThresh);
+                        
+                        for k = 1:length(outlier_idx)
+                            v_global = valid_phys(outlier_idx(k));
+                            if v_global == ref_node || parentNode(v_global) == 0
+                                continue;
+                            end
+                            
+                            v_ori = oris(outlier_idx(k));
+                            current_dev = devs(outlier_idx(k));
+                            
+                            nbrs = neighbors(G, v_global);
+                            best_new_dev = current_dev;
+                            best_u_global = -1;
+                            best_edge_idx_G = -1;
+                            
+                            for n = 1:length(nbrs)
+                                u_global = nbrs(n);
+                                if u_global <= maxPhysId && id2idx(u_global) > 0
+                                    
+                                    % Check if u_global is a descendant of v_global
+                                    is_descendant = false;
+                                    curr = u_global;
+                                    while curr ~= 0
+                                        if curr == v_global
+                                            is_descendant = true;
+                                            break;
+                                        end
+                                        curr = parentNode(curr);
+                                    end
+                                    
+                                    if is_descendant
+                                        continue;
+                                    end
+                                    u_ori = obj.grains(id2idx(u_global)).meanOrientation;
+                                    edgeIdxG = findedge(G, u_global, v_global);
+                                    
+                                    if edgeIdxG > 0
+                                        v_num = str2double(G.Edges.Variant{edgeIdxG});
+                                        var_mori = variants(v_num);
+                                        
+                                        test_dev = min(angle(v_ori, u_ori * var_mori), angle(v_ori, u_ori * inv(var_mori)));
+                                        if test_dev < best_new_dev && test_dev < outlierThresh
+                                            best_new_dev = test_dev;
+                                            best_u_global = u_global;
+                                            best_edge_idx_G = edgeIdxG;
+                                        end
+                                    end
+                                end
+                            end
+                            
+                            if best_u_global ~= -1
+                                warning('TwinNetwork:computeQuotientGraph:sanityCheck', ...
+                                    'Outlier grain %d (dev %.1f deg) reassigned to neighbor %d (new dev %.1f deg).', ...
+                                    v_global, current_dev/degree, best_u_global, best_new_dev/degree);
+                                    
+                                old_p_global = parentNode(v_global);
+                                
+                                mstG = rmedge(mstG, old_p_global, v_global);
+                                
+                                edgeToAdd = G.Edges(best_edge_idx_G, :);
+                                mstG = addedge(mstG, edgeToAdd);
+                                
+                                changed = true;
+                                break;
+                            end
+                        end
+                        if changed, break; end
                     end
+                end
+                if ~changed
+                    break;
                 end
             end
 
-            % 5. Group nodes that resolved to the exact same reduced word
-            [unqStates, ~, groupIDs] = unique(string(nodeStates));
-
-            % 6. Build the final Quotient Graph
+            % Step 3: Build the final Quotient Graph
             numGroups = length(unqStates);
             Q = graph();
             Q = addnode(Q, numGroups);
@@ -876,7 +988,7 @@ classdef twinNetwork < handle
                 vars = G.Edges.Variant;
 
                 qEdges = [u, v];
-                qEdges = sort(qEdges, 2); % Standardize undirected edges
+                qEdges = sort(qEdges, 2);
 
                 strKeys = cell(size(qEdges, 1), 1);
                 for i = 1:size(qEdges, 1)
@@ -885,7 +997,6 @@ classdef twinNetwork < handle
 
                 [~, unqIdx] = unique(strKeys);
 
-                % Filter out self-loops (edges where both nodes contract to the same group)
                 validEdges = qEdges(unqIdx, 1) ~= qEdges(unqIdx, 2);
 
                 EdgeT = table(qEdges(unqIdx(validEdges), :), vars(unqIdx(validEdges)), ...
@@ -898,19 +1009,7 @@ classdef twinNetwork < handle
 
             obj.QuotientGraph = Q;
             obj.nodeGroups = groupIDs;
-
-            mstG = graph();
-            mstG = addnode(mstG, numNodes);
-            if ~isempty(mstS)
-                if hasDeviation
-                    EdgeT = table([mstS, mstT], mstVar, mstDev, 'VariableNames', {'EndNodes', 'Variant', 'AngularDeviation'});
-                else
-                    EdgeT = table([mstS, mstT], mstVar, 'VariableNames', {'EndNodes', 'Variant'});
-                end
-                mstG = addedge(mstG, EdgeT);
-            end
             obj.mstGraph = mstG;
-        warning('TwinNetwork:computeQuotientGraph:sanityCheck','Here we can introduce a sanity check, via grain orientation, we check for every group in the quotient graph if there are significant outliers (>15°) and then see if any other edges attached to these outliers allows for a different grouping, for which the orientation gets checked again. If non of the edges allow for a more fitting grouping, the original grouping in the quotient graph is kept and a warning is displayed. If a more fitting grouping is found (all groupings have to be possible in the tagged graph, the orinentation is only the backcheck not the source of the grouping), then this node gets moved to another group in the quotient and the necessary edge-edits will be made in the MST')
         end
         function exportGraphData(obj, filename)
             % Default filename if none is provided

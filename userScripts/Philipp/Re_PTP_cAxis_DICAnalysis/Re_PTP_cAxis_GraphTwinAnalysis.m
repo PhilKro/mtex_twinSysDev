@@ -139,7 +139,6 @@ figure; plot(ebsd,ebsd.orientations); nextAxis; plot(ebsd_filled, ebsd_filled.or
 %% Graph-Based Twin Analysis (11-21 Twins)
 
 % --- Settings ---
-detectParent2SecondaryTwinBoundaries = true; % Set to false to disable double-twin boundary detection for consumed primary twins
 maxGenerationLimit = 3; % Enforces how deep the twinning can go (e.g., 2 restricts analysis to primary and secondary twins)
 
 % 1. Define the 11-21 twin system
@@ -147,23 +146,19 @@ tS_1121 = twinSystem.hexagonal_1121(CS);
 % 2. Initialize the TwinNetwork
 % This class neatly encapsulates the graph-theoretical topology extraction,
 % multi-region decomposition, and exact reference frame propagation.
-network = TwinNetwork(grains, gB, tS_1121, ...
-    'detectConsumedTwins', detectParent2SecondaryTwinBoundaries, ...
-    'maxGenerationLimit', maxGenerationLimit);
+network = twinNetwork(grains, gB, tS_1121, ebsd, ...
+    'maxGenerationLimit', maxGenerationLimit, 'twinThresh', 6*degree);
 
 % 3. Execute the topological pipeline
-disp('Building topological boundaries...');
-network.buildTopology();
+disp('Computing quotient graph...');
+network.computeQuotientGraph('stable', true);
+network.plotGraph('type', 'mst');
+network.plotGraph('type', 'quotient');
 
-disp('Propagating reference frames via Graph BFS...');
-network.propagateReferences();
-
-disp('Computing Twin Deformation Strain Tensors...');
-network.calculateDeformation();
+disp('Identifying parents...');
+network.identifyParents();
 
 % 4. Generate Analytics & Plots
-network.plotQuotientGraph();
-network.plotGenerations();
-network.plotTwinVariants();
+network.plot('twinsOnly', true);
 
-disp('Twin Graphification and OOP extraction successfully completed.');
+disp('Twin Graphification successfully completed.');
