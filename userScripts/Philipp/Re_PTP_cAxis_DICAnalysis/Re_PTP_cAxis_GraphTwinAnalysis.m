@@ -139,7 +139,7 @@ figure; plot(ebsd,ebsd.orientations); nextAxis; plot(ebsd_filled, ebsd_filled.or
 %% Graph-Based Twin Analysis (11-21 Twins)
 
 % --- Settings ---
-maxGenerationLimit = 3; % Enforces how deep the twinning can go (e.g., 2 restricts analysis to primary and secondary twins)
+maxGenerationLimit = 2; % Enforces how deep the twinning can go (e.g., 2 restricts analysis to primary and secondary twins)
 
 % 1. Define the 11-21 twin system
 tS_1121 = twinSystem.hexagonal_1121(CS);
@@ -147,11 +147,11 @@ tS_1121 = twinSystem.hexagonal_1121(CS);
 % This class neatly encapsulates the graph-theoretical topology extraction,
 % multi-region decomposition, and exact reference frame propagation.
 network = twinNetwork(grains, gB, tS_1121, ebsd, ...
-    'maxGenerationLimit', maxGenerationLimit, 'twinThresh', 6*degree);
+    'maxGenerationLimit', maxGenerationLimit, 'twinThresh', 8*degree);
 
 % 3. Execute the topological pipeline
 disp('Computing quotient graph...');
-network.computeQuotientGraph('stable', true);
+network.computeQuotientGraph('stable', 'all');
 network.plotGraph('type', 'mst');
 network.plotGraph('type', 'quotient');
 
