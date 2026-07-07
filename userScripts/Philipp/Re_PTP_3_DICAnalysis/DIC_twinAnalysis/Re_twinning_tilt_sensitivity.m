@@ -21,7 +21,7 @@ plottingConvention.default.outOfScreen = -zvector;
 % --- Analysis Parameters ---
 % Define the range of tilt corrections to test (in degrees)
 % This will be applied as an additional rotation around the x-axis.
-tilt_series = 0:1:5; 
+tilt_series = 1:1:1; 
 
 % Primary variants to consider in the analysis
 pVars = 1:6;
@@ -95,7 +95,7 @@ originalParentOri = parentGrain.meanOrientation;
 fprintf('Original parent grain ID: %d\n', parentId);
 
 % Define the {11-21} twinning system for Rhenium
-tS_1121 = twinSystem.hexagonal_1121_0001(CS);
+tS_1121 = twinSystem.hexagonal_1121(CS);
 tS_sym = tS_1121.symmetrise;
 
 % Prepare experimental strain tensor E_exp from DIC data
@@ -141,10 +141,10 @@ for tilt_correction_deg = tilt_series
     parentOri_tilted= parentOri_tilted.project2FundamentalRegion(reforientation);
     % --- b. Recalculate Theoretical Twin Tensors ---
     % Generate twin orientations from the tilted parent
-    primaryTwin_tilted = parentOri_tilted * tS_sym;
+    % primaryTwin_tilted = parentOri_tilted * tS_sym;
 
     % Get theoretical displacement gradients and Green-Lagrange strain
-    H_tilted = primaryTwin_tilted.displacementGradient;
+    H_tilted = parentOri_tilted * tS_sym.displacementGradient;
     F_id_tilted = H_tilted(pVars) + tensor.eye(size(H_tilted(pVars)));
     F_id_tilted = deformationGradientTensor(F_id_tilted);
     E_id_tilted = F_id_tilted.GreenStrain;
@@ -203,13 +203,19 @@ for tilt_correction_deg = tilt_series
     close(fig1);
 
     % Plot 2: Scalar Projection Factor 'x' Map
+
+    bestMagnitudeX_plot = bestMagnitudeX;
+    bestMagnitudeX_plot(bestMagnitudeX>1.5) = 0;
+
     fig2 = figure('Visible', 'off');
-    plot(ebsd{inc}, bestMagnitudeX);
+    plot(ebsd{inc}, bestMagnitudeX_plot);
     hold on;
     plot(grains{inc}.boundary, 'linewidth', linewidth_gB, 'linecolor', linecolor_gB);
     hold off;
     title(sprintf('Scalar Projection Factor ''x'' (Tilt: %+d°)', tilt_correction_deg));
-    colormap turbo;
+    
+    colormap viridis;
+    % colormap(bandpass_perceptual(256, [0.2, 1.35], [0.4, 1.15]));
     setColorRange([0.2, 1.35]);
     mtexColorbar;
     
@@ -217,8 +223,11 @@ for tilt_correction_deg = tilt_series
     close(fig2);
     
     % Plot 3: Shape Mismatch Map
+    minMismatch_plot = minMismatch;
+    minMismatch_plot(minMismatch>1) = 0;
+
     fig3 = figure('Visible', 'off');
-    plot(ebsd{inc}, minMismatch);
+    plot(ebsd{inc}, minMismatch_plot);
     hold on;
     plot(grains{inc}.boundary, 'linewidth', linewidth_gB, 'linecolor', linecolor_gB);
     hold off;
@@ -232,3 +241,35 @@ for tilt_correction_deg = tilt_series
 end
 
 fprintf('\n--- Tilt sensitivity analysis complete. Plots saved to: %s ---\n', outputPath);
+
+function cmap = bandpass_perceptual(n, dataRange, targetRange)
+% Perceptually uniform band-pass colormap using the actual Viridis path
+    if nargin < 1, n = 256; end
+    if nargin < 2, dataRange = [0 1]; end
+    if nargin < 3, targetRange = [0.3 0.7]; end
+    
+    % Axis in real data units
+    x = linspace(dataRange(1), dataRange(2), n);
+    
+    % Center + width of highlight region
+    xc = mean(targetRange);
+    
+    % Define sigma ONCE before calculating the weight
+    % Narrower denominator = sharper transition
+    sigma = (targetRange(2) - targetRange(1)) / 3; 
+    
+    % Smooth band-pass weight (values from 0 to 1)
+    % 0 = far from target, 1 = exactly at target center
+    w = exp(-((x - xc).^2) / (2*sigma^2));
+    
+    % Generate a high-resolution base viridis colormap
+    base_cmap = viridis(256); 
+    
+    % Map the weight 'w' to indices in the base colormap (1 to 256)
+    % w=0 maps to index 1 (dark purple)
+    % w=1 maps to index 256 (bright yellow)
+    idx = round(w * 255) + 1;
+    
+    % Construct the new colormap by looking up the correct viridis colors
+    cmap = base_cmap(idx, :);
+end

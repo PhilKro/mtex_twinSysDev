@@ -932,7 +932,6 @@ classdef twinNetwork < handle
                         [unqStates, ~, groupIDs] = unique(string(nodeStates));
                         numGroups = length(unqStates);
                         groupRefOris = cell(numGroups, 1);
-                        groupRefNodes = zeros(numGroups, 1);
                         for g = 1:numGroups
                             g_nodes = find(groupIDs == g);
                             phys_g_nodes = g_nodes(g_nodes <= maxPhysId);
@@ -940,9 +939,27 @@ classdef twinNetwork < handle
                             if ~isempty(valid_phys)
                                 oris = obj.grains(id2idx(valid_phys)).meanOrientation;
                                 grp_areas = obj.grains(id2idx(valid_phys)).area;
-                                [~, maxAreaIdxLocal] = max(grp_areas);
-                                groupRefOris{g} = oris(maxAreaIdxLocal);
-                                groupRefNodes(g) = valid_phys(maxAreaIdxLocal);
+                                
+                                num_nodes = length(oris);
+                                if num_nodes == 1
+                                    bestIdx = 1;
+                                    robust_ref_ori = oris;
+                                else
+                                    scores = zeros(num_nodes, 1);
+                                    for i = 1:num_nodes
+                                        % Find how many grains are within a tight cluster (5 degrees)
+                                        close_idx = angle(oris(i), oris) < (5 * degree);
+                                        % Score by cluster density, use normalized area to break ties
+                                        scores(i) = sum(close_idx) + (grp_areas(i) / max(grp_areas)) * 0.1;
+                                    end
+                                    [~, bestIdx] = max(scores);
+                                    
+                                    % Calculate the true robust mean of this dense inlier cluster
+                                    inlier_idx = angle(oris(bestIdx), oris) < (5 * degree);
+                                    robust_ref_ori = mean(oris(inlier_idx));
+                                end
+                                
+                                groupRefOris{g} = robust_ref_ori;
                             end
                         end
                         
@@ -958,14 +975,13 @@ classdef twinNetwork < handle
                             end
                             
                             ref_ori = groupRefOris{g};
-                            ref_node = groupRefNodes(g);
                             oris = obj.grains(id2idx(valid_phys)).meanOrientation;
                             devs = angle(oris, ref_ori);
                             outlier_local_idx = find(devs > outlierThresh);
                             
                             for k = 1:length(outlier_local_idx)
                                 v_global = valid_phys(outlier_local_idx(k));
-                                if v_global == ref_node || parentNode(v_global) == 0
+                                if parentNode(v_global) == 0
                                     continue;
                                 end
                                 all_outliers = [all_outliers; v_global, devs(outlier_local_idx(k))];
@@ -983,6 +999,25 @@ classdef twinNetwork < handle
                                 current_dev = all_outliers(k, 2);
                                 v_ori = obj.grains(id2idx(v_global)).meanOrientation;
                                 
+                                v_group_id = groupIDs(v_global);
+                                v_children_count = sum(parentNode == v_global);
+                                g_nodes = find(groupIDs == v_group_id);
+                                phys_g_nodes = g_nodes(g_nodes <= maxPhysId);
+                                valid_phys = phys_g_nodes(id2idx(phys_g_nodes) > 0);
+                                if ~isempty(valid_phys)
+                                    grp_areas = obj.grains(id2idx(valid_phys)).area;
+                                    [~, sortIdx] = sort(grp_areas, 'descend');
+                                    sorted_nodes = valid_phys(sortIdx);
+                                    nodes_str = sprintf('%d,', sorted_nodes);
+                                    nodes_str = nodes_str(1:end-1);
+                                else
+                                    nodes_str = 'none';
+                                end
+                                
+                                warning('TwinNetwork:computeQuotientGraph:outlierFound', ...
+                                    '\n=== Outlier grain %d found ===\nHas %d children node(s).\nCurrent nodes in the same group: %s (listed largest to smallest area).\nAng deviation from robust group center: %.1f deg', ...
+                                    v_global, v_children_count, nodes_str, current_dev/degree);
+                                
                                 nbrs = neighbors(G, v_global);
                                 best_new_dev = current_dev;
                                 best_u_global = -1;
@@ -993,6 +1028,7 @@ classdef twinNetwork < handle
                                     u_graph = nbrs(n);
                                     
                                     if u_graph == parentNode(v_global)
+                                        warning('TwinNetwork:computeQuotientGraph:outlierSkip', '  -> Skipped neighbor %d because it is the current parent in the MST.', u_graph);
                                         continue;
                                     end
                                     
@@ -1006,6 +1042,7 @@ classdef twinNetwork < handle
                                     end
                                     
                                     if u_phys > maxPhysId || id2idx(u_phys) == 0
+                                        warning('TwinNetwork:computeQuotientGraph:outlierSkip', '  -> Skipped neighbor %d because could not trace to a valid physical anchor.', u_graph);
                                         continue;
                                     end
                                     
@@ -1018,7 +1055,10 @@ classdef twinNetwork < handle
                                         end
                                         curr = parentNode(curr);
                                     end
-                                    if is_descendant, continue; end
+                                    if is_descendant
+                                        warning('TwinNetwork:computeQuotientGraph:outlierSkip', '  -> Skipped neighbor %d (anchor %d) because it is a descendant of the outlier.', u_graph, u_phys);
+                                        continue; 
+                                    end
                                     
                                     % Disregard if the physical anchor is an outlier
                                     u_state_str = nodeStates{u_phys};
@@ -1033,7 +1073,10 @@ classdef twinNetwork < handle
                                             end
                                         end
                                     end
-                                    if u_is_outlier, continue; end
+                                    if u_is_outlier
+                                        warning('TwinNetwork:computeQuotientGraph:outlierSkip', '  -> Skipped neighbor %d (anchor %d) because the anchor is also flagged as an outlier.', u_graph, u_phys);
+                                        continue; 
+                                    end
                                     
                                     % Calculate theoretical orientation of u_graph
                                     curr_node = u_graph;
@@ -1075,29 +1118,32 @@ classdef twinNetwork < handle
                                     end
                                     
                                     target_g = find(unqStates == string(test_state_str));
-                                    eval_target_ref_node = u_graph;
                                     eval_dev = local_dev;
                                     if ~isempty(target_g) && length(target_g) == 1
                                         target_ref_ori = groupRefOris{target_g};
                                         if ~isempty(target_ref_ori)
                                             eval_dev = angle(v_ori, target_ref_ori);
-                                            eval_target_ref_node = groupRefNodes(target_g);
                                         end
                                     end
                                     
+                                    warning('TwinNetwork:computeQuotientGraph:outlierAttempt', ...
+                                        '  -> Tested neighbor %d (anchor %d). Eval dev %.1f deg (threshold %.1f deg).', ...
+                                        u_graph, u_phys, eval_dev/degree, outlierThresh/degree);
+                                        
                                     if eval_dev < outlierThresh && eval_dev < best_new_dev
+                                        warning('TwinNetwork:computeQuotientGraph:outlierAttempt', ...
+                                            '     * This beats current best dev (%.1f deg). Selected as new candidate.', best_new_dev/degree);
                                         best_new_dev = eval_dev;
                                         best_u_global = u_graph;
                                         best_v_num = test_v_num;
                                         best_u_theo_ori = u_theo_ori;
-                                        best_target_ref_node = eval_target_ref_node;
                                     end
                                 end
                                 
                                 if best_u_global ~= -1
                                     warning('TwinNetwork:computeQuotientGraph:outlierCheck', ...
-                                        'Outlier grain %d (old dev %.1f deg from ref %d) reassigned to neighbor %d (new dev %.1f deg from ref %d) via variant %d.', ...
-                                        v_global, current_dev/degree, ref_node, best_u_global, best_new_dev/degree, best_target_ref_node, best_v_num);
+                                        'Outlier grain %d (old dev %.1f deg) reassigned to neighbor %d (new dev %.1f deg) via variant %d.', ...
+                                        v_global, current_dev/degree, best_u_global, best_new_dev/degree, best_v_num);
                                         
                                     old_p_global = parentNode(v_global);
                                     mstG = rmedge(mstG, old_p_global, v_global);
