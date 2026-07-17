@@ -9,7 +9,7 @@ plottingConvention.default.east = xvector;
 plottingConvention.default.outOfScreen = -zvector;
 
 % filename
-dir = 'N:\EBSD-Analysis-2\Philipp_EBSD_analysis2\0003_Re_cAxis_2\Experiment\Re_c_Axis_PTP_2\SphericalIndexing\';
+dir = 'C:\Users\phkr\MTEX_workEnv\userScripts\Philipp\Re_PTP_cAxis_DICAnalysis\';
 file = 'Re_c_Axis_PTP_2 Specimen 2 Site 3 Map Data 6_BW263.ang';
 % dir = 'onedriveData/Kamila';
 % file = 'pillar29 Specimen 3 Site 1 Map Data 3_BW158.ang';

@@ -87,10 +87,6 @@ classdef twinNetwork < handle
             obj.edgeData.grainId = gB_grainId;
             obj.edgeData.ebsdId = gB_ebsdId;
 
-            % Mean Orientations of grains on both sides
-            obj.edgeData.grainOri1 = obj.grains(grains.id2ind(gB_grainId(:,1))).meanOrientation;
-            obj.edgeData.grainOri2 = obj.grains(grains.id2ind(gB_grainId(:,2))).meanOrientation;
-
             % Orientations of EBSD pixels on both sides
             obj.edgeData.ebsdOri1 = obj.ebsd(ebsd.id2ind(gB_ebsdId(:,1))).orientations;
             obj.edgeData.ebsdOri2 = obj.ebsd(ebsd.id2ind(gB_ebsdId(:,2))).orientations;
@@ -103,11 +99,15 @@ classdef twinNetwork < handle
             meanE1_array = [meanE1{:}];
             meanE2_array = [meanE2{:}];
 
+            % Extract local grain orientations to align EBSD data to the fundamental region
+            grainOri1 = obj.grains(grains.id2ind(gB_grainId(:,1))).meanOrientation;
+            grainOri2 = obj.grains(grains.id2ind(gB_grainId(:,2))).meanOrientation;
+
             obj.edgeData.meanEbsdOri1 = meanE1_array(dirTags);
-            obj.edgeData.meanEbsdOri1 = obj.edgeData.meanEbsdOri1(:).project2FundamentalRegion(obj.edgeData.grainOri1);
+            obj.edgeData.meanEbsdOri1 = obj.edgeData.meanEbsdOri1(:).project2FundamentalRegion(grainOri1);
 
             obj.edgeData.meanEbsdOri2 = meanE2_array(dirTags);
-            obj.edgeData.meanEbsdOri2 = obj.edgeData.meanEbsdOri2(:).project2FundamentalRegion(obj.edgeData.grainOri2);
+            obj.edgeData.meanEbsdOri2 = obj.edgeData.meanEbsdOri2(:).project2FundamentalRegion(grainOri2);
 
             % Explicit boundary misorientation (ebsdOri2 -> ebsdOri1)
             obj.edgeData.misorientation = inv(obj.edgeData.ebsdOri2) .* obj.edgeData.ebsdOri1;
@@ -177,6 +177,7 @@ classdef twinNetwork < handle
             vNodeIdx = numPhysNodes;
             vNodeCoords = [];
             vNodeGens = {};
+            vNodeOris = orientation.empty(0, 1);
             warning('twinNetwork:twinNetwork:initialGrainErrorReduction','Maybe start the graph from the grain with the lowest GROD to size ratio? or sth similar')
             for c = 1:max(bins)
                 compNodes = find(bins == c);
@@ -279,14 +280,12 @@ classdef twinNetwork < handle
                             idx1 = obj.edgeData.grainId(:,1) == nxtNode;
                             idx2 = obj.edgeData.grainId(:,2) == nxtNode;
 
-                            % Project grain, EBSD, and meanEBSD orientations
+                            % Project EBSD and meanEBSD orientations (Removed grainOri1/2 projection)
                             if any(idx1)
-                                obj.edgeData.grainOri1(idx1) = obj.edgeData.grainOri1(idx1).project2FundamentalRegion(center_ori);
                                 obj.edgeData.ebsdOri1(idx1)  = obj.edgeData.ebsdOri1(idx1).project2FundamentalRegion(center_ori);
                                 obj.edgeData.meanEbsdOri1(idx1) = obj.edgeData.meanEbsdOri1(idx1).project2FundamentalRegion(center_ori);
                             end
                             if any(idx2)
-                                obj.edgeData.grainOri2(idx2) = obj.edgeData.grainOri2(idx2).project2FundamentalRegion(center_ori);
                                 obj.edgeData.ebsdOri2(idx2)  = obj.edgeData.ebsdOri2(idx2).project2FundamentalRegion(center_ori);
                                 obj.edgeData.meanEbsdOri2(idx2) = obj.edgeData.meanEbsdOri2(idx2).project2FundamentalRegion(center_ori);
                             end
@@ -296,9 +295,12 @@ classdef twinNetwork < handle
                             obj.edgeData.misorientation(idx_update) = inv(obj.edgeData.ebsdOri2(idx_update)) .* obj.edgeData.ebsdOri1(idx_update);
                         end
 
+                        v_step_ori = currOri;
                         prevNode = currNode;
                         for step = 1:length(seq)
                             v_step = seq(step);
+                            v_step_ori = v_step_ori * variants(v_step);
+                            
                             if step == length(seq)
                                 s_nodes(end+1, 1) = prevNode;
                                 t_nodes(end+1, 1) = nxtNode;
@@ -306,6 +308,7 @@ classdef twinNetwork < handle
                                 angular_deviation_list(end+1, 1) = dev;
                             else
                                 vNodeIdx = vNodeIdx + 1;
+                                vNodeOris = [vNodeOris; v_step_ori];
 
                                 coord1 = obj.grains(id2idx(currNode)).centroid;
                                 coord2 = obj.grains(id2idx(nxtNode)).centroid;
@@ -344,10 +347,26 @@ classdef twinNetwork < handle
             obj.untaggedGraph = G_undir;
 
             if ~isempty(vNodeCoords)
-                obj.virtualNodes = table(vNodeCoords(:,1), vNodeCoords(:,2), vNodeGens, 'VariableNames', {'x', 'y', 'Sequence'});
+                obj.virtualNodes = table(vNodeCoords(:,1), vNodeCoords(:,2), vNodeGens, vNodeOris, 'VariableNames', {'x', 'y', 'Sequence', 'meanOrientation'});
             else
-                obj.virtualNodes = table([], [], {}, 'VariableNames', {'x', 'y', 'Sequence'});
+                obj.virtualNodes = table([], [], {}, orientation.empty(0, 1), 'VariableNames', {'x', 'y', 'Sequence', 'meanOrientation'});
             end
+            
+            % Give ALL nodes their mathematically exact meanOrientation directly on the Graph
+            % We append in a loop to be 100% MTEX-safe.
+                all_node_oris = orientation.empty(0, 1);
+                for n = 1:numTotalNodes
+                    if n <= numPhysNodes && id2idx(n) > 0
+                        all_node_oris = [all_node_oris; obj.grains(id2idx(n)).meanOrientation(:)];
+                    elseif n > numPhysNodes
+                        vIdx = n - numPhysNodes;
+                        all_node_oris = [all_node_oris; obj.virtualNodes.meanOrientation(vIdx)];
+                    else
+                        % If node doesn't exist, append a NaN orientation or a dummy one
+                        all_node_oris = [all_node_oris; orientation.nan(obj.grains.CS)];
+                    end
+                end
+                obj.Graph.Nodes.meanOrientation = all_node_oris;
         end
 
         function plotGraph(obj, varargin)
@@ -431,7 +450,7 @@ classdef twinNetwork < handle
 
             nodeLabels = cell(numPlotNodes, 1);
             for i = 1:numPlotNodes
-                if i <= max(obj.grains.id) && id2idx(i) > 0
+                if (i <= max(obj.grains.id) && id2idx(i) > 0) || i > max(obj.grains.id)
                     nodeLabels{i} = num2str(i);
                 else
                     nodeLabels{i} = '';
@@ -711,17 +730,8 @@ classdef twinNetwork < handle
                             path = obj.groupVariantPaths{g};
                             V = path(1);
                             
-                            % Find corrected grain orientation
-                            edgeIdx1 = find(obj.edgeData.grainId(:, 1) == i, 1);
-                            edgeIdx2 = find(obj.edgeData.grainId(:, 2) == i, 1);
-                            
-                            if ~isempty(edgeIdx1)
-                                correctedTwinOri = obj.edgeData.grainOri1(edgeIdx1);
-                            elseif ~isempty(edgeIdx2)
-                                correctedTwinOri = obj.edgeData.grainOri2(edgeIdx2);
-                            else
-                                correctedTwinOri = obj.grains(idx).meanOrientation; % fallback
-                            end
+                            % Find corrected grain orientation natively from Graph
+                            correctedTwinOri = obj.Graph.Nodes.meanOrientation(idx);
                             
                             variant_mori = variants(V);
                             
@@ -753,6 +763,7 @@ classdef twinNetwork < handle
             end
 
             G = obj.Graph;
+            search_G = G;
             if isempty(G) || numnodes(G) == 0
                 Q = graph();
                 groupIDs = [];
@@ -937,7 +948,7 @@ classdef twinNetwork < handle
                             phys_g_nodes = g_nodes(g_nodes <= maxPhysId);
                             valid_phys = phys_g_nodes(id2idx(phys_g_nodes) > 0);
                             if ~isempty(valid_phys)
-                                oris = obj.grains(id2idx(valid_phys)).meanOrientation;
+                                oris = search_G.Nodes.meanOrientation(valid_phys);
                                 grp_areas = obj.grains(id2idx(valid_phys)).area;
                                 
                                 num_nodes = length(oris);
@@ -975,7 +986,7 @@ classdef twinNetwork < handle
                             end
                             
                             ref_ori = groupRefOris{g};
-                            oris = obj.grains(id2idx(valid_phys)).meanOrientation;
+                            oris = search_G.Nodes.meanOrientation(valid_phys);
                             devs = angle(oris, ref_ori);
                             outlier_local_idx = find(devs > outlierThresh);
                             
@@ -997,7 +1008,7 @@ classdef twinNetwork < handle
                             for k = 1:size(all_outliers, 1)
                                 v_global = all_outliers(k, 1);
                                 current_dev = all_outliers(k, 2);
-                                v_ori = obj.grains(id2idx(v_global)).meanOrientation;
+                                v_ori = search_G.Nodes.meanOrientation(v_global);
                                 
                                 v_group_id = groupIDs(v_global);
                                 v_children_count = sum(parentNode == v_global);
@@ -1018,236 +1029,384 @@ classdef twinNetwork < handle
                                     '\n=== Outlier grain %d found ===\nHas %d children node(s).\nCurrent nodes in the same group: %s (listed largest to smallest area).\nAng deviation from robust group center: %.1f deg', ...
                                     v_global, v_children_count, nodes_str, current_dev/degree);
                                 
-                                nbrs = neighbors(G, v_global);
-                                best_new_dev = current_dev;
-                                best_u_global = -1;
-                                best_v_num = -1;
-                                best_u_theo_ori = [];
-                                
-                                for n = 1:length(nbrs)
-                                    u_graph = nbrs(n);
-                                    
-                                    if u_graph == parentNode(v_global)
-                                        warning('TwinNetwork:computeQuotientGraph:outlierSkip', '  -> Skipped neighbor %d because it is the current parent in the MST.', u_graph);
-                                        continue;
-                                    end
-                                    
-                                    % Trace virtual nodes UP to the closest physical node
-                                    u_phys = u_graph;
-                                    while u_phys > maxPhysId || id2idx(u_phys) == 0
-                                        if parentNode(u_phys) == 0
-                                            break;
-                                        end
-                                        u_phys = parentNode(u_phys);
-                                    end
-                                    
-                                    if u_phys > maxPhysId || id2idx(u_phys) == 0
-                                        warning('TwinNetwork:computeQuotientGraph:outlierSkip', '  -> Skipped neighbor %d because could not trace to a valid physical anchor.', u_graph);
-                                        continue;
-                                    end
-                                    
-                                    % Disregard if descendant
-                                    is_descendant = false;
-                                    curr = u_phys;
-                                    while curr ~= 0
-                                        if curr == v_global
-                                            is_descendant = true; break;
-                                        end
-                                        curr = parentNode(curr);
-                                    end
-                                    if is_descendant
-                                        warning('TwinNetwork:computeQuotientGraph:outlierSkip', '  -> Skipped neighbor %d (anchor %d) because it is a descendant of the outlier.', u_graph, u_phys);
-                                        continue; 
-                                    end
-                                    
-                                    % Disregard if the physical anchor is an outlier
-                                    u_state_str = nodeStates{u_phys};
-                                    u_g = find(unqStates == string(u_state_str));
-                                    u_is_outlier = false;
-                                    if ~isempty(u_g)
-                                        u_ref_ori = groupRefOris{u_g};
-                                        if ~isempty(u_ref_ori)
-                                            u_ori = obj.grains(id2idx(u_phys)).meanOrientation;
-                                            if angle(u_ori, u_ref_ori) > outlierThresh
-                                                u_is_outlier = true;
-                                            end
-                                        end
-                                    end
-                                    if u_is_outlier
-                                        warning('TwinNetwork:computeQuotientGraph:outlierSkip', '  -> Skipped neighbor %d (anchor %d) because the anchor is also flagged as an outlier.', u_graph, u_phys);
-                                        continue; 
-                                    end
-                                    
-                                    % Calculate theoretical orientation of u_graph
-                                    curr_node = u_graph;
-                                    path_variants = [];
-                                    while curr_node ~= u_phys
-                                        p_node = parentNode(curr_node);
-                                        edgeIdx = findedge(mstG, p_node, curr_node);
-                                        if edgeIdx == 0
-                                            edgeIdx = findedge(mstG, curr_node, p_node);
-                                        end
-                                        v_num = str2double(mstG.Edges.Variant{edgeIdx});
-                                        path_variants = [v_num, path_variants];
-                                        curr_node = p_node;
-                                    end
-                                    
-                                    u_theo_ori = obj.grains(id2idx(u_phys)).meanOrientation;
-                                    for pv = 1:length(path_variants)
-                                        u_theo_ori = u_theo_ori * variants(path_variants(pv));
-                                    end
-                                    
-                                    % Calculate variant and local deviation
-                                    angList = angle(v_ori, u_theo_ori * variants(:)');
-                                    [local_dev, test_v_num] = min(angList);
-                                    
-                                    % Check if it yields a lower misorientation from the new group
-                                    c_idx = bins(v_global);
-                                    test_state = subStates{u_graph};
-                                    if ~isempty(test_state) && test_state(end) == test_v_num
-                                        test_state(end) = [];
+                                % FUSED OUTLIER SEARCH LOOP
+                                % Collect subtree nodes
+                                subtree_nodes = v_global;
+                                sq = v_global;
+                                while ~isempty(sq)
+                                    curr = sq(1); sq(1) = [];
+                                    chs = find(parentNode == curr);
+                                    if isempty(subtree_nodes)
+                                        subtree_nodes = chs;
                                     else
-                                        test_state(end+1) = test_v_num;
+                                        subtree_nodes = [subtree_nodes; chs];
                                     end
                                     
-                                    if isempty(test_state)
-                                        test_state_str = sprintf('C%d_ROOT', c_idx);
+                                    if isempty(sq)
+                                        sq = chs;
                                     else
-                                        str_s = sprintf('%d_', test_state);
-                                        test_state_str = sprintf('C%d_%s', c_idx, str_s(1:end-1));
-                                    end
-                                    
-                                    target_g = find(unqStates == string(test_state_str));
-                                    eval_dev = local_dev;
-                                    if ~isempty(target_g) && length(target_g) == 1
-                                        target_ref_ori = groupRefOris{target_g};
-                                        if ~isempty(target_ref_ori)
-                                            eval_dev = angle(v_ori, target_ref_ori);
-                                        end
-                                    end
-                                    
-                                    warning('TwinNetwork:computeQuotientGraph:outlierAttempt', ...
-                                        '  -> Tested neighbor %d (anchor %d). Eval dev %.1f deg (threshold %.1f deg).', ...
-                                        u_graph, u_phys, eval_dev/degree, outlierThresh/degree);
-                                        
-                                    if eval_dev < outlierThresh && eval_dev < best_new_dev
-                                        warning('TwinNetwork:computeQuotientGraph:outlierAttempt', ...
-                                            '     * This beats current best dev (%.1f deg). Selected as new candidate.', best_new_dev/degree);
-                                        best_new_dev = eval_dev;
-                                        best_u_global = u_graph;
-                                        best_v_num = test_v_num;
-                                        best_u_theo_ori = u_theo_ori;
+                                        sq = [sq; chs];
                                     end
                                 end
                                 
-                                if best_u_global ~= -1
-                                    warning('TwinNetwork:computeQuotientGraph:outlierCheck', ...
-                                        'Outlier grain %d (old dev %.1f deg) reassigned to neighbor %d (new dev %.1f deg) via variant %d.', ...
-                                        v_global, current_dev/degree, best_u_global, best_new_dev/degree, best_v_num);
-                                        
-                                    old_p_global = parentNode(v_global);
-                                    mstG = rmedge(mstG, old_p_global, v_global);
-                                    
-                                    hasDeviation = ismember('AngularDeviation', mstG.Edges.Properties.VariableNames);
-                                    if hasDeviation
-                                        newEdgeT = table([best_u_global, v_global], {num2str(best_v_num)}, best_new_dev, 'VariableNames', {'EndNodes', 'Variant', 'AngularDeviation'});
-                                    else
-                                        newEdgeT = table([best_u_global, v_global], {num2str(best_v_num)}, 'VariableNames', {'EndNodes', 'Variant'});
+                                v_comp = bins(v_global);
+                                compNodes = find(bins == v_comp);
+                                comp_root = 0;
+                                for ci = 1:length(compNodes)
+                                    if parentNode(compNodes(ci)) == 0
+                                        comp_root = compNodes(ci);
+                                        break;
                                     end
-                                    mstG = addedge(mstG, newEdgeT);
-                                    parentNode(v_global) = best_u_global;
-                                    
-                                    % Downward propagation of FZ, states, and variants
-                                    v_center_ori = best_u_theo_ori * variants(best_v_num);
-                                    
-                                    new_v_state = subStates{best_u_global};
-                                    if ~isempty(new_v_state) && new_v_state(end) == best_v_num
-                                        new_v_state(end) = [];
+                                end
+                                
+                                fallback_success = false;
+                                if comp_root ~= 0
+                                    % Do NOT reset search_G = G because search_G contains the progressively updated Orientations!
+                                    if ismember('AngularDeviation', search_G.Edges.Properties.VariableNames)
+                                        search_G.Edges.Weight = search_G.Edges.AngularDeviation;
                                     else
-                                        new_v_state(end+1) = best_v_num;
+                                        search_G.Edges.Weight = ones(numedges(search_G), 1);
                                     end
                                     
-                                    queue_nodes = v_global;
-                                    queue_centers = v_center_ori;
-                                    queue_states = {new_v_state};
+                                    p_global = parentNode(v_global);
+                                    edgeIdx1 = findedge(search_G, p_global, v_global);
+                                    edgeIdx2 = findedge(search_G, v_global, p_global);
+                                    if edgeIdx1 > 0, search_G.Edges.Weight(edgeIdx1) = inf; end
+                                    if edgeIdx2 > 0, search_G.Edges.Weight(edgeIdx2) = inf; end
                                     
-                                    while ~isempty(queue_nodes)
-                                        curr = queue_nodes(1); queue_nodes(1) = [];
-                                        curr_center = queue_centers(1); queue_centers(1) = [];
-                                        curr_state = queue_states{1}; queue_states(1) = [];
+                                    warning('TwinNetwork:computeQuotientGraph:fusedSearch', '  -> Searching for optimal reconnection for node %d (and its subtree).', v_global);
+                                    
+                                    for fallback_iter = 1:10
+                                        [P, D] = shortestpathtree(search_G, comp_root, 'Method', 'positive');
+                                        subtree_dists = D(subtree_nodes);
+                                        [min_dist, min_idx] = min(subtree_dists);
                                         
-                                        subStates{curr} = curr_state;
-                                        if isempty(curr_state)
-                                            nodeStates{curr} = sprintf('C%d_ROOT', bins(curr));
-                                        else
-                                            str_s = sprintf('%d_', curr_state);
-                                            nodeStates{curr} = sprintf('C%d_%s', bins(curr), str_s(1:end-1));
+                                        if isinf(min_dist)
+                                            warning('TwinNetwork:computeQuotientGraph:fusedSearch', '     * Attempt %d: No path found to the subtree.', fallback_iter);
+                                            break;
                                         end
                                         
-                                        if curr <= maxPhysId && id2idx(curr) > 0
-                                            obj.grains(id2idx(curr)).meanOrientation = obj.grains(id2idx(curr)).meanOrientation.project2FundamentalRegion(curr_center);
-                                            curr_phys_ori = obj.grains(id2idx(curr)).meanOrientation;
-                                            
-                                            idx1 = obj.edgeData.grainId(:,1) == curr;
-                                            idx2 = obj.edgeData.grainId(:,2) == curr;
-                                            if any(idx1)
-                                                obj.edgeData.grainOri1(idx1) = obj.edgeData.grainOri1(idx1).project2FundamentalRegion(curr_center);
-                                                obj.edgeData.ebsdOri1(idx1)  = obj.edgeData.ebsdOri1(idx1).project2FundamentalRegion(curr_center);
-                                                obj.edgeData.meanEbsdOri1(idx1) = obj.edgeData.meanEbsdOri1(idx1).project2FundamentalRegion(curr_center);
+                                        target_node = subtree_nodes(min_idx);
+                                        % Use shortestpath to get the actual path
+                                        path_nodes = shortestpath(search_G, comp_root, target_node, 'Method', 'positive');
+                                        
+                                        if length(path_nodes) < 2
+                                            break;
+                                        end
+                                        new_anchor = path_nodes(end-1);
+                                        edgeIdx = findedge(search_G, new_anchor, target_node);
+                                        if edgeIdx == 0, edgeIdx = findedge(search_G, target_node, new_anchor); end
+                                        
+                                        % 1. Create a temporary MST
+                                        temp_mstG = mstG;
+                                        temp_parentNode = parentNode;
+                                        temp_mstG = rmedge(temp_mstG, p_global, v_global);
+                                        
+                                        % Invert subtree connections from target_node up to v_global
+                                        if target_node ~= v_global
+                                            curr_inv = target_node;
+                                            prev_inv = 0;
+                                            while curr_inv ~= 0
+                                                next_inv = parentNode(curr_inv);
+                                                temp_parentNode(curr_inv) = prev_inv;
+                                                if curr_inv == v_global
+                                                    break;
+                                                end
+                                                prev_inv = curr_inv;
+                                                curr_inv = next_inv;
                                             end
-                                            if any(idx2)
-                                                obj.edgeData.grainOri2(idx2) = obj.edgeData.grainOri2(idx2).project2FundamentalRegion(curr_center);
-                                                obj.edgeData.ebsdOri2(idx2)  = obj.edgeData.ebsdOri2(idx2).project2FundamentalRegion(curr_center);
-                                                obj.edgeData.meanEbsdOri2(idx2) = obj.edgeData.meanEbsdOri2(idx2).project2FundamentalRegion(curr_center);
-                                            end
-                                            idx_update = idx1 | idx2;
-                                            obj.edgeData.misorientation(idx_update) = inv(obj.edgeData.ebsdOri2(idx_update)) .* obj.edgeData.ebsdOri1(idx_update);
-                                        else
-                                            curr_phys_ori = curr_center;
                                         end
                                         
-                                        children = find(parentNode == curr);
-                                        for c_idx_child = 1:length(children)
-                                            child = children(c_idx_child);
+                                        % Finally, connect target_node to new_anchor
+                                        temp_parentNode(target_node) = new_anchor;
+                                        
+                                        % 2. Get effective orientation of new_anchor natively from the Graph Nodes
+                                        eff_center = search_G.Nodes.meanOrientation(new_anchor);
+                                        
+                                        % 3. Evaluate the connection to target_node using actual variant
+                                        target_ori = search_G.Nodes.meanOrientation(target_node);
+                                        angList = angle(target_ori, eff_center * variants(:)');
+                                        [conn_dev, best_v_num] = min(angList);
+                                        target_center = eff_center * variants(best_v_num);
+                                        
+                                        % Add the new edge to temp_mstG using best_v_num
+                                        hasDev = ismember('AngularDeviation', temp_mstG.Edges.Properties.VariableNames);
+                                        if hasDev
+                                            newEdgeT = table([new_anchor, target_node], {num2str(best_v_num)}, conn_dev, 'VariableNames', {'EndNodes', 'Variant', 'AngularDeviation'});
+                                        else
+                                            newEdgeT = table([new_anchor, target_node], {num2str(best_v_num)}, 'VariableNames', {'EndNodes', 'Variant'});
+                                        end
+                                        temp_mstG = addedge(temp_mstG, newEdgeT);
+                                        
+                                        % 4. Propagate down the subtree and find max deviation
+                                        sq = target_node;
+                                        sq_centers = target_center;
+                                        max_subtree_dev = 0;
+                                        worst_node = -1;
+                                        
+                                        while ~isempty(sq)
+                                            curr = sq(1); sq(1) = [];
+                                            curr_c = sq_centers(1); sq_centers(1) = [];
                                             
-                                            edgeIdx = findedge(mstG, curr, child);
-                                            if edgeIdx == 0
-                                                edgeIdx = findedge(mstG, child, curr);
+                                            curr_ori = search_G.Nodes.meanOrientation(curr);
+                                            dev = angle(curr_ori, curr_c);
+                                            if dev > max_subtree_dev
+                                                max_subtree_dev = dev;
+                                                worst_node = curr;
                                             end
                                             
-                                            if child <= maxPhysId && id2idx(child) > 0
-                                                child_ori_old = obj.grains(id2idx(child)).meanOrientation;
-                                                angList = angle(child_ori_old, curr_phys_ori * variants(:)');
+                                            chs = find(temp_parentNode == curr);
+                                            for c_idx = 1:length(chs)
+                                                child = chs(c_idx);
+                                                eIdx = findedge(temp_mstG, curr, child);
+                                                if eIdx == 0, eIdx = findedge(temp_mstG, child, curr); end
+                                                v_num = str2double(temp_mstG.Edges.Variant{eIdx});
+                                                
+                                                if isempty(sq)
+                                                    sq = child;
+                                                else
+                                                    sq = [sq; child];
+                                                end
+                                                
+                                                new_c = curr_c * variants(v_num);
+                                                if isempty(sq_centers)
+                                                    sq_centers = new_c;
+                                                else
+                                                    sq_centers = [sq_centers; new_c];
+                                                end
+                                            end
+                                        end
+                                        % Trace full node path from outlier node (v_global) to root in temp_parentNode
+                                        curr_trace = v_global;
+                                        full_node_path = curr_trace;
+                                        while curr_trace ~= 0
+                                            p_node = temp_parentNode(curr_trace);
+                                            if p_node == 0, break; end
+                                            full_node_path = [p_node, full_node_path];
+                                            curr_trace = p_node;
+                                        end
+                                        node_path_str = sprintf('%d-', full_node_path);
+                                        node_path_str = node_path_str(1:end-1);
+                                        
+                                        % Propagate down the path to correctly evaluate variants in the Fundamental Zone
+                                        full_var_path = [];
+                                        root_node = full_node_path(1);
+                                        eff_center = search_G.Nodes.meanOrientation(root_node);
+                                        
+                                        for path_idx = 1:length(full_node_path)-1
+                                            n1 = full_node_path(path_idx);
+                                            n2 = full_node_path(path_idx+1);
+                                            
+                                            target_ori = search_G.Nodes.meanOrientation(n2);
+                                            
+                                            eIdx_trace = findedge(temp_mstG, n1, n2);
+                                            if eIdx_trace == 0, eIdx_trace = findedge(temp_mstG, n2, n1); end
+                                            if eIdx_trace > 0
+                                                orig_v_num = str2double(temp_mstG.Edges.Variant{eIdx_trace});
+                                            else
+                                                eIdx_search = findedge(search_G, n1, n2);
+                                                if eIdx_search == 0, eIdx_search = findedge(search_G, n2, n1); end
+                                                orig_v_num = str2double(search_G.Edges.Variant{eIdx_search});
+                                            end
+                                            
+                                            angList = angle(target_ori, eff_center * variants(:)');
+                                            [~, best_v_num] = min(angList);
+                                            
+                                            % Project the target into the fundamental region exactly as in line 283
+                                                center_ori = eff_center * variants(best_v_num);
+                                                target_ori_proj = target_ori.project2FundamentalRegion(center_ori);
+                                                
+                                                disp(['--- Tracing edge ' num2str(n1) ' -> ' num2str(n2) ' ---']);
+                                                disp(['Original Variant in graph: ' num2str(orig_v_num)]);
+                                                disp(['New Recalculated Variant: ' num2str(best_v_num)]);
+                                                disp('Euler angles BEFORE recasting to FZ (deg):');
+                                                try
+                                                    disp(target_ori.Euler ./ degree);
+                                                catch
+                                                    disp(target_ori);
+                                                end
+                                                disp('Euler angles AFTER recasting to FZ (deg):');
+                                                try
+                                                    disp(target_ori_proj.Euler ./ degree);
+                                                catch
+                                                    disp(target_ori_proj);
+                                                end
+                                                
+                                                eff_center = target_ori_proj;
+                                            
+                                            full_var_path(end+1) = best_v_num;
+                                        end
+                                        
+                                        if isempty(full_var_path)
+                                            full_var_str = '[]';
+                                        else
+                                            full_var_str = ['[', num2str(full_var_path), ']'];
+                                        end
+                                        
+                                        % Evaluate reduced group state for v_global
+                                        v_global_state = [];
+                                        for v_idx_reduce = 1:length(full_var_path)
+                                            if ~isempty(v_global_state) && v_global_state(end) == full_var_path(v_idx_reduce)
+                                                v_global_state(end) = [];
+                                            else
+                                                v_global_state(end+1) = full_var_path(v_idx_reduce);
+                                            end
+                                        end
+                                        
+                                        c_idx = bins(v_global);
+                                        if isempty(v_global_state)
+                                            v_global_state_str = sprintf('C%d_ROOT', c_idx);
+                                            var_str = '[]';
+                                        else
+                                            str_s = sprintf('%d_', v_global_state);
+                                            v_global_state_str = sprintf('C%d_%s', c_idx, str_s(1:end-1));
+                                            var_str = ['[', num2str(v_global_state), ']'];
+                                        end
+                                        
+                                        % Determine the theoretical global expected orientation
+                                        expected_global_ori = search_G.Nodes.meanOrientation(full_node_path(1));
+                                        for v = v_global_state
+                                            expected_global_ori = expected_global_ori * variants(v);
+                                        end
+                                        
+                                        % Find if this group state already exists and has an empirical center
+                                        state_idx = find(unqStates == string(v_global_state_str));
+                                        if ~isempty(state_idx) && ~isempty(groupRefOris{state_idx})
+                                            ref_ori = groupRefOris{state_idx};
+                                            is_empirical = true;
+                                        else
+                                            ref_ori = expected_global_ori;
+                                            is_empirical = false;
+                                        end
+                                        
+                                        global_dev = angle(search_G.Nodes.meanOrientation(v_global), ref_ori);
+                                        
+                                        warning('TwinNetwork:computeQuotientGraph:fusedSearch', '     * Attempt %d: Found path via %d->%d. Subtree max dev %.1f deg (node %d). Global dev %.1f deg (Empirical Ref: %d). Temp group: %s (reduced group state: %s, full path: %s).', fallback_iter, new_anchor, target_node, max_subtree_dev/degree, worst_node, global_dev/degree, is_empirical, v_global_state_str, var_str, full_var_str);
+                                        
+                                        if max_subtree_dev < outlierThresh && global_dev < outlierThresh
+                                            fallback_success = true;
+                                            best_u_global = new_anchor;
+                                            best_v_num_final = best_v_num;
+                                            best_u_eff_ori = eff_center;
+                                            final_target_node = target_node;
+                                            final_max_dev = max_subtree_dev;
+                                            final_state_str = v_global_state_str;
+                                            final_var_str = var_str;
+                                            final_full_var_str = full_var_str;
+                                            final_root_node = full_node_path(1);
+                                            final_node_path_str = node_path_str;
+                                            mstG = temp_mstG;
+                                            parentNode = temp_parentNode;
+                                            break;
+                                        else
+                                            search_G.Edges.Weight(edgeIdx) = inf;
+                                            warning('TwinNetwork:computeQuotientGraph:fusedSearch', '     * Path invalid. Masking edge %d-%d and retrying.', new_anchor, target_node);
+                                        end
+                                    end
+                                end
+                                
+                                    if ~fallback_success
+                                        warning('TwinNetwork:computeQuotientGraph:unfixableOutlier', ...
+                                            'Outlier grain %d (dev %.1f deg) could not be reassigned. No valid alternative path found.', ...
+                                            v_global, current_dev/degree);
+                                    else
+                                        warning('TwinNetwork:computeQuotientGraph:outlierCheck', ...
+                                            'Outlier grain %d (old max dev %.1f deg) reassigned to neighbor %d (new max dev %.1f deg) via variant %d. Now in temp group: %s (reduced group state: %s, full variant path: %s, root: %d, nodes: %s).', ...
+                                            v_global, current_dev/degree, best_u_global, final_max_dev/degree, best_v_num_final, final_state_str, final_var_str, final_full_var_str, final_root_node, final_node_path_str);
+                                            
+                                        v_center_ori = best_u_eff_ori * variants(best_v_num_final);
+                                        new_v_state = subStates{best_u_global};
+                                        if ~isempty(new_v_state) && new_v_state(end) == best_v_num_final
+                                            new_v_state(end) = [];
+                                        else
+                                            new_v_state(end+1) = best_v_num_final;
+                                        end
+                                        
+                                        queue_nodes = final_target_node;
+                                        queue_centers = v_center_ori;
+                                        queue_states = {new_v_state};
+                                        
+                                        % Final downward FZ propagation
+                                        while ~isempty(queue_nodes)
+                                            curr = queue_nodes(1); queue_nodes(1) = [];
+                                            curr_center = queue_centers(1); queue_centers(1) = [];
+                                            curr_state = queue_states{1}; queue_states(1) = [];
+                                            
+                                            subStates{curr} = curr_state;
+                                            if isempty(curr_state)
+                                                nodeStates{curr} = sprintf('C%d_ROOT', bins(curr));
+                                            else
+                                                str_s = sprintf('%d_', curr_state);
+                                                nodeStates{curr} = sprintf('C%d_%s', bins(curr), str_s(1:end-1));
+                                            end
+                                            
+                                            % Propagate FZ to the graph node natively!
+                                            search_G.Nodes.meanOrientation(curr) = search_G.Nodes.meanOrientation(curr).project2FundamentalRegion(curr_center);
+                                            curr_ori = search_G.Nodes.meanOrientation(curr);
+                                            
+                                            % FZ Propagate EBSD data ONLY IF it's a physical node
+                                            if curr <= maxPhysId && id2idx(curr) > 0
+                                                idx1 = obj.edgeData.grainId(:,1) == curr;
+                                                idx2 = obj.edgeData.grainId(:,2) == curr;
+                                                if any(idx1)
+                                                    obj.edgeData.ebsdOri1(idx1)  = obj.edgeData.ebsdOri1(idx1).project2FundamentalRegion(curr_center);
+                                                    obj.edgeData.meanEbsdOri1(idx1) = obj.edgeData.meanEbsdOri1(idx1).project2FundamentalRegion(curr_center);
+                                                end
+                                                if any(idx2)
+                                                    obj.edgeData.ebsdOri2(idx2)  = obj.edgeData.ebsdOri2(idx2).project2FundamentalRegion(curr_center);
+                                                    obj.edgeData.meanEbsdOri2(idx2) = obj.edgeData.meanEbsdOri2(idx2).project2FundamentalRegion(curr_center);
+                                                end
+                                                idx_update = idx1 | idx2;
+                                                obj.edgeData.misorientation(idx_update) = inv(obj.edgeData.ebsdOri2(idx_update)) .* obj.edgeData.ebsdOri1(idx_update);
+                                            end
+                                            
+                                            children = find(parentNode == curr);
+                                            for c_idx_child = 1:length(children)
+                                                child = children(c_idx_child);
+                                                
+                                                edgeIdx = findedge(mstG, curr, child);
+                                                if edgeIdx == 0
+                                                    edgeIdx = findedge(mstG, child, curr);
+                                                end
+                                                
+                                                % Uniform variant assignment for physical and virtual nodes!
+                                                child_ori_old = search_G.Nodes.meanOrientation(child);
+                                                angList = angle(child_ori_old, curr_ori * variants(:)');
                                                 [~, new_v_num_child] = min(angList);
                                                 
                                                 mstG.Edges.Variant{edgeIdx} = num2str(new_v_num_child);
-                                                child_center = curr_phys_ori * variants(new_v_num_child);
-                                            else
-                                                old_v_num = str2double(mstG.Edges.Variant{edgeIdx});
-                                                new_v_num_child = old_v_num;
-                                                child_center = curr_phys_ori * variants(old_v_num);
+                                                child_center = curr_ori * variants(new_v_num_child);
+                                                
+                                                next_child_state = curr_state;
+                                                if ~isempty(next_child_state) && next_child_state(end) == new_v_num_child
+                                                    next_child_state(end) = [];
+                                                else
+                                                    next_child_state(end+1) = new_v_num_child;
+                                                end
+                                                
+                                                if isempty(queue_nodes)
+                                                    queue_nodes = child;
+                                                else
+                                                    queue_nodes = [queue_nodes; child];
+                                                end
+                                                
+                                                if isempty(queue_centers)
+                                                    queue_centers = child_center;
+                                                else
+                                                    queue_centers = [queue_centers; child_center];
+                                                end
+                                                
+                                                if isempty(queue_states)
+                                                    queue_states = {next_child_state};
+                                                else
+                                                    queue_states = [queue_states; {next_child_state}];
+                                                end
                                             end
-                                            
-                                            next_child_state = curr_state;
-                                            if ~isempty(next_child_state) && next_child_state(end) == new_v_num_child
-                                                next_child_state(end) = [];
-                                            else
-                                                next_child_state(end+1) = new_v_num_child;
-                                            end
-                                            
-                                            queue_nodes = [queue_nodes; child];
-                                            queue_centers = [queue_centers; child_center];
-                                            queue_states = [queue_states; {next_child_state}];
                                         end
+                                        
+                                        outliers_loop_changed = true;
+                                        break; % Restart the loop to recompute groupRefOris and sort remaining outliers!
                                     end
-                                    
-                                    outliers_loop_changed = true;
-                                    break; % Restart the loop to recompute groupRefOris and sort remaining outliers!
-                                else
-                                    warning('TwinNetwork:computeQuotientGraph:unfixableOutlier', ...
-                                        'Outlier grain %d (dev %.1f deg) could not be reassigned. No valid alternative path found.', ...
-                                        v_global, current_dev/degree);
-                                end
                             end
                         end
                         changed = outliers_loop_changed; % ensure parent scope knows if anything changed
@@ -1289,6 +1448,7 @@ classdef twinNetwork < handle
                 end
             end
 
+            obj.Graph = search_G;
             obj.QuotientGraph = Q;
             obj.nodeGroups = groupIDs;
             obj.mstGraph = mstG;
