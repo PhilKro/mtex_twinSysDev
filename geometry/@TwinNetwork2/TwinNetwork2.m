@@ -343,20 +343,16 @@ classdef TwinNetwork2 < handle
                     continue;
                 end
                 
-                subG = subgraph(G_undir, compNodeIdx);
-                [subMST, ~] = minspantree(subG);
+                [localS, localT, localSeq, localDev, localVar, localE1, localE2] = obj.extractComponentMST(G_undir, compNodeIdx);
                 
-                if numedges(subMST) > 0
-                    localS = subMST.Edges.EndNodes(:, 1);
-                    localT = subMST.Edges.EndNodes(:, 2);
-                    
+                if ~isempty(localS)
                     mstS = [mstS; compNodeIdx(localS)];
                     mstT = [mstT; compNodeIdx(localT)];
-                    mstSeq = [mstSeq; subMST.Edges.Sequence];
-                    mstDev = [mstDev; subMST.Edges.AngularDeviation];
-                    mstVar = [mstVar; subMST.Edges.Variant];
-                    mstE1 = [mstE1; subMST.Edges.MeanEbsdOri1];
-                    mstE2 = [mstE2; subMST.Edges.MeanEbsdOri2];
+                    mstSeq = [mstSeq; localSeq];
+                    mstDev = [mstDev; localDev];
+                    mstVar = [mstVar; localVar];
+                    mstE1 = [mstE1; localE1];
+                    mstE2 = [mstE2; localE2];
                 end
             end
             
@@ -364,6 +360,24 @@ classdef TwinNetwork2 < handle
                 mstEdgeT = table([mstS, mstT], mstSeq, mstDev, mstVar, mstE1, mstE2, ...
                     'VariableNames', {'EndNodes', 'Sequence', 'AngularDeviation', 'Variant', 'MeanEbsdOri1', 'MeanEbsdOri2'});
                 mstG = addedge(mstG, mstEdgeT);
+            end
+        end
+        
+        function [localS, localT, localSeq, localDev, localVar, localE1, localE2] = extractComponentMST(obj, G_undir, compNodeIdx)
+            subG = subgraph(G_undir, compNodeIdx);
+            [subMST, ~] = minspantree(subG);
+            
+            if numedges(subMST) > 0
+                localS = subMST.Edges.EndNodes(:, 1);
+                localT = subMST.Edges.EndNodes(:, 2);
+                localSeq = subMST.Edges.Sequence;
+                localDev = subMST.Edges.AngularDeviation;
+                localVar = subMST.Edges.Variant;
+                localE1 = subMST.Edges.MeanEbsdOri1;
+                localE2 = subMST.Edges.MeanEbsdOri2;
+            else
+                localS = []; localT = []; localSeq = {}; localDev = [];
+                localVar = []; localE1 = orientation.empty(0, 1); localE2 = orientation.empty(0, 1);
             end
         end
 
@@ -389,10 +403,13 @@ classdef TwinNetwork2 < handle
                 % Find root (largest physical grain)
                 physNodes = compNodeIdx(mstG.Nodes.Type(compNodeIdx) == "Physical");
                 if ~isempty(physNodes)
-                    [~, maxAreaIdx] = max(mstG.Nodes.Area(physNodes));
+                    [maxArea, maxAreaIdx] = max(mstG.Nodes.Area(physNodes));
                     rootNode = physNodes(maxAreaIdx);
+                    fprintf('  [DEBUG-ROOT] Component %d: Chose root Grain %d with area %.2f.\n', c, rootNode, maxArea);
+                    % fprintf('               Physical nodes in this component: %s\n', mat2str(physNodes'));
                 else
                     rootNode = compNodeIdx(1);
+                    fprintf('  [DEBUG-ROOT] Component %d: No physical nodes. Chose root node %d.\n', c, rootNode);
                 end
                 
                 mstG.Nodes.State(rootNode) = sprintf('C%d_ROOT', c);
@@ -669,10 +686,12 @@ classdef TwinNetwork2 < handle
                     fprintf('\nAttempting to rewire ISOLATED Grain %d (State: %s) at depth %d...\n', v_node, unqStates{groupIDs(v_node)}, all_problems(1, 4));
                 end
                 
-                % 5. Subtree Collection
+                % 5. Subtree Collection & Component Identification
                 p_node = parent_nodes(v_node);
                 c_idx = bins(v_node);
                 comp_root = comp_roots(c_idx);
+                compNodeIdx = find(bins == c_idx);
+                compNodeIdx = compNodeIdx(:); % Force column vector
                 
                 subtree_nodes = v_node;
                 sq = v_node;
@@ -692,113 +711,119 @@ classdef TwinNetwork2 < handle
                 if edgeIdx1 > 0, old_w1 = search_G.Edges.Weight(edgeIdx1); search_G.Edges.Weight(edgeIdx1) = inf; end
                 if edgeIdx2 > 0, old_w2 = search_G.Edges.Weight(edgeIdx2); search_G.Edges.Weight(edgeIdx2) = inf; end
                 
-                % Find shortest path from root to ANY node in the subtree
-                [~, D] = shortestpathtree(search_G, comp_root, 'Method', 'positive');
+                fallback_success = false;
                 
-                subtree_dists = D(subtree_nodes);
-                [min_dist, min_idx] = min(subtree_dists);
-                
-                if isinf(min_dist)
-                    fprintf('  -> FAILED: No alternative path found for Grain %d.\n', v_node);
-                    if edgeIdx1 > 0, search_G.Edges.Weight(edgeIdx1) = old_w1; end
-                    if edgeIdx2 > 0, search_G.Edges.Weight(edgeIdx2) = old_w2; end
-                    unfixable_nodes(end+1) = v_node;
-                    loop_changed = true;
-                    continue;
-                end
-                
-                target_node = subtree_nodes(min_idx);
-                path_nodes = shortestpath(search_G, comp_root, target_node, 'Method', 'positive');
-                new_anchor = path_nodes(end-1);
-                
-                fprintf('  -> SUCCESS: Rewiring %d to anchor %d (target %d in subtree).\n', v_node, new_anchor, target_node);
-                
-                % 6. Mutate mstG
-                mstG = rmedge(mstG, p_node, v_node);
-                mstG = rmedge(mstG, v_node, p_node);
-                
-                % To treat virtual nodes correctly, we MUST add every missing edge
-                % along the shortest path from comp_root to target_node.
-                % This ensures that isolated virtual nodes are fully bridged back to the tree!
-                for pi = 1:length(path_nodes)-1
-                    n1 = path_nodes(pi);
-                    n2 = path_nodes(pi+1);
+                for fallback_iter = 1:10
+                    % Extract the MST for this component using the masked search_G
+                    [localS, localT, localSeq, localDev, localVar, localE1, localE2] = obj.extractComponentMST(search_G, compNodeIdx);
                     
-                    if findedge(mstG, n1, n2) == 0 && findedge(mstG, n2, n1) == 0
-                        eIdx = findedge(search_G, n1, n2);
-                        if eIdx == 0, eIdx = findedge(search_G, n2, n1); end
+                    if isempty(localS)
+                        break;
+                    end
+                    
+                    % Create a temporary graph to test the new MST
+                    temp_mstG = mstG;
+                    
+                    % Remove all existing edges for this component from temp_mstG
+                    subG_old = subgraph(temp_mstG, compNodeIdx);
+                    if numedges(subG_old) > 0
+                        sub_s = compNodeIdx(subG_old.Edges.EndNodes(:,1));
+                        sub_t = compNodeIdx(subG_old.Edges.EndNodes(:,2));
+                        temp_mstG = rmedge(temp_mstG, sub_s, sub_t);
+                    end
+                    
+                    % Add the new MST edges
+                    newEdgesTable = table([compNodeIdx(localS), compNodeIdx(localT)], localSeq, localDev, localVar, localE1, localE2, ...
+                        'VariableNames', {'EndNodes', 'Sequence', 'AngularDeviation', 'Variant', 'MeanEbsdOri1', 'MeanEbsdOri2'});
+                    temp_mstG = addedge(temp_mstG, newEdgesTable);
+                    
+                    % Re-propagate FZ states perfectly down the new topology!
+                    temp_mstG.Nodes.State(:) = "[]";
+                    temp_mstG = obj.resolveNodeStates(temp_mstG);
+                    
+                    % Validate the new orientation of v_node
+                    new_state = temp_mstG.Nodes.State(v_node);
+                    
+                    % Compute robust center for the new state to check deviation
+                    [temp_unqStates, ~, temp_groupIDs] = unique(temp_mstG.Nodes.State);
+                    s_idx = find(temp_unqStates == new_state);
+                    s_nodes = find(temp_groupIDs == s_idx);
+                    phys_nodes = s_nodes(temp_mstG.Nodes.Type(s_nodes) == "Physical");
+                    
+                    dev_val = inf;
+                    if length(phys_nodes) > 1
+                        oris = temp_mstG.Nodes.MeanOrientation(phys_nodes);
+                        areas = temp_mstG.Nodes.Area(phys_nodes);
+                        scores = zeros(length(oris), 1);
+                        for i = 1:length(oris)
+                            close_idx = angle(oris(i), oris) < (5 * degree);
+                            scores(i) = sum(close_idx) + (areas(i) / max(areas)) * 0.1;
+                        end
+                        [~, bestIdx] = max(scores);
+                        inlier_idx = angle(oris(bestIdx), oris) < (5 * degree);
+                        robust_ref = mean(oris(inlier_idx));
                         
-                        newEdgeRow = search_G.Edges(eIdx, :);
-                        extra_vars = setdiff(newEdgeRow.Properties.VariableNames, mstG.Edges.Properties.VariableNames);
-                        if ~isempty(extra_vars)
-                            newEdgeRow = removevars(newEdgeRow, extra_vars);
+                        v_ori = temp_mstG.Nodes.MeanOrientation(v_node);
+                        dev_val = angle(v_ori, robust_ref);
+                    end
+                    
+                    if dev_val < 15 * degree
+                        fallback_success = true;
+                        
+                        if debug_mode
+                            fprintf('    [DEBUG] Iter %d SUCCESS for Grain %d:\n', fallback_iter, v_node);
+                            fprintf('      - Severed Edge:  Grain %d <-> Grain %d\n', v_node, p_node);
+                            fprintf('      - New State:     %s\n', new_state);
+                            fprintf('      - New Deviation: %.2f deg\n', dev_val / degree);
+                        else
+                            fprintf('  -> SUCCESS: Rewired %d optimally via Component MST.\n', v_node);
                         end
                         
-                        mstG = addedge(mstG, newEdgeRow);
+                        mstG = temp_mstG;
+                        break;
+                    else
+                        if debug_mode
+                            fprintf('    [DEBUG] Iter %d FAILED validation:\n', fallback_iter);
+                            fprintf('      - Resulting State: %s\n', new_state);
+                            fprintf('      - Deviation: %.2f deg (Exceeds 15 deg threshold!)\n', dev_val / degree);
+                        end
+                        
+                        % Find the edge bridging the subtree and main tree in the NEW MST
+                        bridge_s = 0; bridge_t = 0;
+                        for ei = 1:length(localS)
+                            g_s = compNodeIdx(localS(ei));
+                            g_t = compNodeIdx(localT(ei));
+                            is_s_in_sub = ismember(g_s, subtree_nodes);
+                            is_t_in_sub = ismember(g_t, subtree_nodes);
+                            if is_s_in_sub ~= is_t_in_sub
+                                bridge_s = g_s;
+                                bridge_t = g_t;
+                                break;
+                            end
+                        end
+                        
+                        if bridge_s > 0
+                            fail_edge = findedge(search_G, bridge_s, bridge_t);
+                            if fail_edge == 0, fail_edge = findedge(search_G, bridge_t, bridge_s); end
+                            search_G.Edges.Weight(fail_edge) = inf;
+                            if debug_mode
+                                fprintf('      - Masking fallback bridge edge: %d <-> %d\n', bridge_s, bridge_t);
+                            end
+                        else
+                            break; % Cannot find a bridge edge, abort fallback
+                        end
                     end
+                end
+                
+                if ~fallback_success
+                    fprintf('  -> FAILED: Exhausted all alternative component MSTs for Grain %d.\n', v_node);
+                    unfixable_nodes(end+1) = v_node;
+                else
+                    loop_changed = true;
                 end
                 
                 if edgeIdx1 > 0, search_G.Edges.Weight(edgeIdx1) = old_w1; end
                 if edgeIdx2 > 0, search_G.Edges.Weight(edgeIdx2) = old_w2; end
-                
-                % 7. Re-propagate FZ states perfectly down the new topology!
-                mstG.Nodes.State(:) = "[]";
-                mstG = obj.resolveNodeStates(mstG);
-                
-                % Compute new deviation for debugging
-                new_state = mstG.Nodes.State(v_node);
-                [temp_unqStates, ~, temp_groupIDs] = unique(mstG.Nodes.State);
-                s_idx = find(temp_unqStates == new_state);
-                s_nodes = find(temp_groupIDs == s_idx);
-                phys_nodes = s_nodes(mstG.Nodes.Type(s_nodes) == "Physical");
-                
-                dev_val = NaN;
-                if length(phys_nodes) > 1
-                    oris = mstG.Nodes.MeanOrientation(phys_nodes);
-                    areas = mstG.Nodes.Area(phys_nodes);
-                    scores = zeros(length(oris), 1);
-                    for i = 1:length(oris)
-                        close_idx = angle(oris(i), oris) < (5 * degree);
-                        scores(i) = sum(close_idx) + (areas(i) / max(areas)) * 0.1;
-                    end
-                    [~, bestIdx] = max(scores);
-                    inlier_idx = angle(oris(bestIdx), oris) < (5 * degree);
-                    robust_ref = mean(oris(inlier_idx));
-                    
-                    v_ori = mstG.Nodes.MeanOrientation(v_node);
-                    dev_val = angle(v_ori, robust_ref);
-                end
-                
-                if debug_mode
-                    % Extract variants along the path_nodes
-                    path_variants = '';
-                    for pi = 1:length(path_nodes)-1
-                        n1 = path_nodes(pi);
-                        n2 = path_nodes(pi+1);
-                        eIdx = findedge(mstG, n1, n2);
-                        if eIdx == 0, eIdx = findedge(mstG, n2, n1); end
-                        if eIdx > 0
-                            var_val = mstG.Edges.Variant(eIdx);
-                            if isnan(var_val)
-                                path_variants = [path_variants, 'NaN-'];
-                            else
-                                path_variants = [path_variants, num2str(var_val), '-'];
-                            end
-                        end
-                    end
-                    if ~isempty(path_variants)
-                        path_variants = path_variants(1:end-1);
-                    end
-                    
-                    fprintf('\n    [DEBUG] Rewiring Report for Grain %d:\n', v_node);
-                    fprintf('      - Severed Edge:  Grain %d <-> Grain %d\n', v_node, p_node);
-                    fprintf('      - New Chain:     %s\n', strjoin(string(path_nodes), ' -> '));
-                    fprintf('      - Variants along chain: %s\n', path_variants);
-                    fprintf('      - New State:     %s\n', new_state);
-                    fprintf('      - New Deviation: %.2f deg\n', dev_val / degree);
-                end
-                
-                loop_changed = true;
             end
         end
         
@@ -1134,7 +1159,7 @@ classdef TwinNetwork2 < handle
                 nodeLabels = cell(numnodes(G), 1);
                 for i = 1:numnodes(G)
                     if isnan(G.Nodes.GrainId(i))
-                        nodeLabels{i} = '';
+                        nodeLabels{i} = ['v', num2str(i)];
                     else
                         nodeLabels{i} = num2str(G.Nodes.GrainId(i));
                     end
