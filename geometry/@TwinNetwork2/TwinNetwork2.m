@@ -42,6 +42,23 @@ classdef TwinNetwork2 < handle
             % Pipeline execution has been removed from constructor to allow step-by-step execution.
             disp('TwinNetwork2 Initialized. Ready for step-by-step pipeline execution.');
         end
+        
+        function robust_ref = computeRobustCenter(obj, oris)
+            if length(oris) <= 1
+                robust_ref = oris;
+                return;
+            end
+            
+            scores = zeros(length(oris), 1);
+            for i = 1:length(oris)
+                close_idx = angle(oris(i), oris) < (5 * degree);
+                scores(i) = sum(close_idx); % Majority vote!
+            end
+            
+            [~, bestIdx] = max(scores);
+            inlier_idx = angle(oris(bestIdx), oris) < (5 * degree);
+            robust_ref = mean(oris(inlier_idx));
+        end
 
         function G = buildInitialGraph(obj)
             % Step A: Build pure topological graph with physical/virtual nodes
@@ -389,6 +406,9 @@ classdef TwinNetwork2 < handle
                 return;
             end
             
+            mstG.Nodes.Depth = zeros(numNodes, 1);
+            mstG.Nodes.ParentNode = zeros(numNodes, 1);
+            
             % Find components to locate roots
             bins = conncomp(mstG);
             numComps = max(bins);
@@ -447,6 +467,9 @@ classdef TwinNetwork2 < handle
                         
                         if ~visited(nxtNode)
                             visited(nxtNode) = true;
+                            
+                            mstG.Nodes.Depth(nxtNode) = mstG.Nodes.Depth(currNode) + 1;
+                            mstG.Nodes.ParentNode(nxtNode) = currNode;
                             
                             % Get base sequence ID from Step A
                             base_v = str2double(mstG.Edges.Sequence{edgeIdx});
@@ -553,12 +576,12 @@ classdef TwinNetwork2 < handle
                 iter = iter + 1;
                 loop_changed = false;
                 
-                % 1. Determine Component Roots and Node Depths via BFS
-                bins = conncomp(mstG); % Removed 'Type', 'weak' to avoid warning on undirected graph
+                % 1. Extract Topological Data from mstG
+                bins = conncomp(mstG);
                 numComps = max(bins);
                 
-                depths = zeros(numNodes, 1);
-                parent_nodes = zeros(numNodes, 1);
+                depths = mstG.Nodes.Depth;
+                parent_nodes = mstG.Nodes.ParentNode;
                 comp_roots = zeros(numComps, 1);
                 
                 for c = 1:numComps
@@ -568,36 +591,12 @@ classdef TwinNetwork2 < handle
                         continue;
                     end
                     
-                    rootNode = 0;
-                    for k = 1:length(compNodeIdx)
-                        if contains(mstG.Nodes.State(compNodeIdx(k)), 'ROOT')
-                            rootNode = compNodeIdx(k);
-                            break;
-                        end
-                    end
-                    if rootNode == 0
-                        rootNode = compNodeIdx(1);
-                    end
-                    comp_roots(c) = rootNode;
-                    
-                    visited = false(numNodes, 1);
-                    visited(rootNode) = true;
-                    depths(rootNode) = 0;
-                    parent_nodes(rootNode) = 0;
-                    
-                    queue = rootNode;
-                    while ~isempty(queue)
-                        curr = queue(1); queue(1) = [];
-                        neigh_nodes = neighbors(mstG, curr);
-                        for n_idx = 1:length(neigh_nodes)
-                            nxtNode = neigh_nodes(n_idx);
-                            if ~visited(nxtNode)
-                                visited(nxtNode) = true;
-                                depths(nxtNode) = depths(curr) + 1;
-                                parent_nodes(nxtNode) = curr;
-                                queue(end+1) = nxtNode;
-                            end
-                        end
+                    % The root is intrinsically defined by the BFS in resolveNodeStates
+                    rootNodes = compNodeIdx(depths(compNodeIdx) == 0);
+                    if isempty(rootNodes)
+                        comp_roots(c) = compNodeIdx(1);
+                    else
+                        comp_roots(c) = rootNodes(1);
                     end
                 end
                 
@@ -617,17 +616,10 @@ classdef TwinNetwork2 < handle
                     oris = mstG.Nodes.MeanOrientation(phys_nodes);
                     areas = mstG.Nodes.Area(phys_nodes);
                     
-                    if length(oris) == 1
+                    if length(oris) <= 1
                         groupRefOris{s} = oris;
                     else
-                        scores = zeros(length(oris), 1);
-                        for i = 1:length(oris)
-                            close_idx = angle(oris(i), oris) < (5 * degree);
-                            scores(i) = sum(close_idx) + (areas(i) / max(areas)) * 0.1;
-                        end
-                        [~, bestIdx] = max(scores);
-                        inlier_idx = angle(oris(bestIdx), oris) < (5 * degree);
-                        groupRefOris{s} = mean(oris(inlier_idx));
+                        groupRefOris{s} = obj.computeRobustCenter(oris);
                     end
                 end
                 
@@ -745,23 +737,16 @@ classdef TwinNetwork2 < handle
                     new_state = temp_mstG.Nodes.State(v_node);
                     
                     % Compute robust center for the new state to check deviation
-                    [temp_unqStates, ~, temp_groupIDs] = unique(temp_mstG.Nodes.State);
-                    s_idx = find(temp_unqStates == new_state);
-                    s_nodes = find(temp_groupIDs == s_idx);
-                    phys_nodes = s_nodes(temp_mstG.Nodes.Type(s_nodes) == "Physical");
+                    % [temp_unqStates, ~, temp_groupIDs] = unique(temp_mstG.Nodes.State);
+                    % s_idx = find(temp_unqStates == new_state);
+                    % s_nodes = find(temp_groupIDs == s_idx);
+                    % phys_nodes = s_nodes(temp_mstG.Nodes.Type(s_nodes) == "Physical");
+                    phys_nodes = find(temp_mstG.Nodes.State == new_state & temp_mstG.Nodes.Type == "Physical");
                     
                     dev_val = inf;
                     if length(phys_nodes) > 1
                         oris = temp_mstG.Nodes.MeanOrientation(phys_nodes);
-                        areas = temp_mstG.Nodes.Area(phys_nodes);
-                        scores = zeros(length(oris), 1);
-                        for i = 1:length(oris)
-                            close_idx = angle(oris(i), oris) < (5 * degree);
-                            scores(i) = sum(close_idx) + (areas(i) / max(areas)) * 0.1;
-                        end
-                        [~, bestIdx] = max(scores);
-                        inlier_idx = angle(oris(bestIdx), oris) < (5 * degree);
-                        robust_ref = mean(oris(inlier_idx));
+                        robust_ref = obj.computeRobustCenter(oris);
                         
                         v_ori = temp_mstG.Nodes.MeanOrientation(v_node);
                         dev_val = angle(v_ori, robust_ref);
@@ -854,17 +839,10 @@ classdef TwinNetwork2 < handle
                     oris = mstG.Nodes.MeanOrientation(phys_nodes);
                     areas = mstG.Nodes.Area(phys_nodes);
                     
-                    if length(oris) == 1
+                    if length(oris) <= 1
                         nodeMeanOris(g) = oris;
                     else
-                        scores = zeros(length(oris), 1);
-                        for i = 1:length(oris)
-                            close_idx = angle(oris(i), oris) < (5 * degree);
-                            scores(i) = sum(close_idx) + (areas(i) / max(areas)) * 0.1;
-                        end
-                        [~, bestIdx] = max(scores);
-                        inlier_idx = angle(oris(bestIdx), oris) < (5 * degree);
-                        nodeMeanOris(g) = mean(oris(inlier_idx));
+                        nodeMeanOris(g) = obj.computeRobustCenter(oris);
                     end
                     
                     total_area = sum(areas);
