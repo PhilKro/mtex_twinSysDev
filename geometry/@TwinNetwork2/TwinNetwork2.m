@@ -669,8 +669,24 @@ classdef TwinNetwork2 < handle
                 [~, sort_idx] = sort(all_problems(:, 4));
                 all_problems = all_problems(sort_idx, :);
                 
-                v_node = all_problems(1, 1);
-                is_outlier = all_problems(1, 3) == 1;
+                if debug_mode
+                    fprintf('\n  [DEBUG] Iteration %d - Identified %d problem nodes:\n', iter, size(all_problems, 1));
+                    for p = 1:size(all_problems, 1)
+                        p_id = all_problems(p, 1);
+                        p_dev = all_problems(p, 2);
+                        p_is_outlier = all_problems(p, 3) == 1;
+                        p_depth = all_problems(p, 4);
+                        if p_is_outlier
+                            fprintf('    - Grain %d: OUTLIER (Dev: %.2f deg, Depth: %d)\n', p_id, p_dev / degree, p_depth);
+                        else
+                            fprintf('    - Grain %d: ISOLATED (Depth: %d)\n', p_id, p_depth);
+                        end
+                    end
+                end
+                
+                for p_idx = 1:size(all_problems, 1)
+                    v_node = all_problems(p_idx, 1);
+                    is_outlier = all_problems(p_idx, 3) == 1;
                 
                 if is_outlier
                     fprintf('\nAttempting to rewire OUTLIER Grain %d (State: %s) at depth %d...\n', v_node, unqStates{groupIDs(v_node)}, all_problems(1, 4));
@@ -705,11 +721,17 @@ classdef TwinNetwork2 < handle
                 
                 fallback_success = false;
                 
+                masked_fallback_edges = [];
+                masked_fallback_weights = [];
+                
                 for fallback_iter = 1:10
                     % Extract the MST for this component using the masked search_G
                     [localS, localT, localSeq, localDev, localVar, localE1, localE2] = obj.extractComponentMST(search_G, compNodeIdx);
                     
-                    if isempty(localS)
+                    if isempty(localS) || any(isinf(localDev))
+                        if debug_mode
+                            fprintf('    [DEBUG] Iter %d: Subtree is fundamentally disconnected (no finite paths left). Aborting fallback.\n', fallback_iter);
+                        end
                         break;
                     end
                     
@@ -790,7 +812,11 @@ classdef TwinNetwork2 < handle
                         if bridge_s > 0
                             fail_edge = findedge(search_G, bridge_s, bridge_t);
                             if fail_edge == 0, fail_edge = findedge(search_G, bridge_t, bridge_s); end
-                            search_G.Edges.Weight(fail_edge) = inf;
+                            if fail_edge > 0
+                                masked_fallback_edges(end+1) = fail_edge;
+                                masked_fallback_weights(end+1) = search_G.Edges.Weight(fail_edge);
+                                search_G.Edges.Weight(fail_edge) = inf;
+                            end
                             if debug_mode
                                 fprintf('      - Masking fallback bridge edge: %d <-> %d\n', bridge_s, bridge_t);
                             end
@@ -800,18 +826,73 @@ classdef TwinNetwork2 < handle
                     end
                 end
                 
+                % Restore all temporarily masked edges in search_G
+                for k = 1:length(masked_fallback_edges)
+                    search_G.Edges.Weight(masked_fallback_edges(k)) = masked_fallback_weights(k);
+                end
+                
+                if edgeIdx1 > 0, search_G.Edges.Weight(edgeIdx1) = old_w1; end
+                if edgeIdx2 > 0, search_G.Edges.Weight(edgeIdx2) = old_w2; end
+                
                 if ~fallback_success
                     fprintf('  -> FAILED: Exhausted all alternative component MSTs for Grain %d.\n', v_node);
                     unfixable_nodes(end+1) = v_node;
                 else
                     loop_changed = true;
+                    break; % Break the p_idx loop to restart the graph evaluation
+                end
+                end
+            end
+            
+            % --- POST-PRUNING THEORETICAL VALIDATION ---
+            if debug_mode
+                fprintf('\n--- Post-Pruning Theoretical Validation ---\n');
+                max_err_threshold = 15 * degree;
+                
+                % Extract root robust centers for each component
+                root_centers = containers.Map();
+                for s = 1:numStates
+                    state_str = char(unqStates{s});
+                    if endsWith(state_str, 'ROOT') && ~isempty(groupRefOris{s})
+                        parts = strsplit(state_str, '_');
+                        comp_idx_str = parts{1}; % e.g., 'C1'
+                        root_centers(comp_idx_str) = groupRefOris{s};
+                    end
                 end
                 
-                if edgeIdx1 > 0, search_G.Edges.Weight(edgeIdx1) = old_w1; end
-                if edgeIdx2 > 0, search_G.Edges.Weight(edgeIdx2) = old_w2; end
+                % Validate every non-root group
+                for s = 1:numStates
+                    state_str = char(unqStates{s});
+                    if endsWith(state_str, 'ROOT') || isempty(groupRefOris{s})
+                        continue;
+                    end
+                    
+                    parts = strsplit(state_str, '_');
+                    comp_idx_str = parts{1};
+                    
+                    if ~root_centers.isKey(comp_idx_str)
+                        continue; % Shouldn't happen, but safe fallback
+                    end
+                    
+                    % Reconstruct theoretical orientation purely from the root and the twin chain
+                    theoOri = root_centers(comp_idx_str);
+                    for v_idx = 2:length(parts)
+                        variant_idx = str2double(parts{v_idx});
+                        theoOri = theoOri * obj.variants(variant_idx);
+                    end
+                    
+                    empiricalOri = groupRefOris{s};
+                    dev_val = angle(empiricalOri, theoOri);
+                    
+                    if dev_val > max_err_threshold
+                        fprintf('  [WARNING] Group %s deviates from theoretical chain by %.2f deg!\n', state_str, dev_val / degree);
+                    else
+                        fprintf('  [OK] Group %s aligns theoretically (Dev: %.2f deg)\n', state_str, dev_val / degree);
+                    end
+                end
+                fprintf('-------------------------------------------\n\n');
             end
         end
-        
         function Q = reduceToQuotient(obj, mstG)
             % Step E: Contract nodes with same state into quotient graph
             Q = digraph();
