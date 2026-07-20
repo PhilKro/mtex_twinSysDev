@@ -304,6 +304,8 @@ classdef TwinNetwork2 < handle
                     'VariableNames', {'EndNodes', 'Sequence', 'AngularDeviation', 'Variant', 'MeanEbsdOri1', 'MeanEbsdOri2'});
                 G = addedge(G, EdgeTable);
             end
+            
+            obj.Graph = G;
         end
 
         function mstG = extractSpanningTree(obj, G)
@@ -374,7 +376,7 @@ classdef TwinNetwork2 < handle
             end
             
             % Find components to locate roots
-            bins = conncomp(mstG, 'Type', 'weak');
+            bins = conncomp(mstG);
             numComps = max(bins);
             
             for c = 1:numComps
@@ -499,33 +501,261 @@ classdef TwinNetwork2 < handle
             end
         end
 
-        function mstG = pruneAndRewireOutliers(obj, mstG)
-            % Step D: Detect and rewire outliers based on empirical state centers
+        function mstG = pruneAndRewireOutliers(obj, mstG, varargin)
+            % Step D: Detect and rewire outliers and isolated nodes based on empirical FZ centers
+            p = inputParser;
+            addParameter(p, 'targetNode', 0);
+            addParameter(p, 'debug', false);
+            parse(p, varargin{:});
+            target_node_override = p.Results.targetNode;
+            debug_mode = p.Results.debug;
             
             numNodes = numnodes(mstG);
             if numNodes == 0
                 return;
             end
             
-            % Compute robust state centers
-            [unqStates, ~, groupIDs] = unique(mstG.Nodes.State);
-            numStates = length(unqStates);
-            groupRefOris = cell(numStates, 1);
+            % The physical topology is inherently undirected. We must search an undirected graph!
+            search_G_dir = obj.Graph;
+            search_G = graph();
+            search_G = addnode(search_G, search_G_dir.Nodes);
+            search_G = addedge(search_G, search_G_dir.Edges);
             
-            for s = 1:numStates
-                s_nodes = find(groupIDs == s);
-                phys_nodes = s_nodes(mstG.Nodes.Type(s_nodes) == "Physical");
+            if ismember('AngularDeviation', search_G.Edges.Properties.VariableNames)
+                search_G.Edges.Weight = search_G.Edges.AngularDeviation;
+            else
+                search_G.Edges.Weight = ones(numedges(search_G), 1);
+            end
+            
+            loop_changed = true;
+            max_iters = 100;
+            iter = 0;
+            unfixable_nodes = [];
+            
+            while loop_changed && iter < max_iters
+                iter = iter + 1;
+                loop_changed = false;
                 
-                if isempty(phys_nodes)
+                % 1. Determine Component Roots and Node Depths via BFS
+                bins = conncomp(mstG); % Removed 'Type', 'weak' to avoid warning on undirected graph
+                numComps = max(bins);
+                
+                depths = zeros(numNodes, 1);
+                parent_nodes = zeros(numNodes, 1);
+                comp_roots = zeros(numComps, 1);
+                
+                for c = 1:numComps
+                    compNodeIdx = find(bins == c);
+                    if length(compNodeIdx) == 1
+                        comp_roots(c) = compNodeIdx(1);
+                        continue;
+                    end
+                    
+                    rootNode = 0;
+                    for k = 1:length(compNodeIdx)
+                        if contains(mstG.Nodes.State(compNodeIdx(k)), 'ROOT')
+                            rootNode = compNodeIdx(k);
+                            break;
+                        end
+                    end
+                    if rootNode == 0
+                        rootNode = compNodeIdx(1);
+                    end
+                    comp_roots(c) = rootNode;
+                    
+                    visited = false(numNodes, 1);
+                    visited(rootNode) = true;
+                    depths(rootNode) = 0;
+                    parent_nodes(rootNode) = 0;
+                    
+                    queue = rootNode;
+                    while ~isempty(queue)
+                        curr = queue(1); queue(1) = [];
+                        neigh_nodes = neighbors(mstG, curr);
+                        for n_idx = 1:length(neigh_nodes)
+                            nxtNode = neigh_nodes(n_idx);
+                            if ~visited(nxtNode)
+                                visited(nxtNode) = true;
+                                depths(nxtNode) = depths(curr) + 1;
+                                parent_nodes(nxtNode) = curr;
+                                queue(end+1) = nxtNode;
+                            end
+                        end
+                    end
+                end
+                
+                % 2. Compute robust state centers
+                [unqStates, ~, groupIDs] = unique(mstG.Nodes.State);
+                numStates = length(unqStates);
+                groupRefOris = cell(numStates, 1);
+                
+                for s = 1:numStates
+                    s_nodes = find(groupIDs == s);
+                    phys_nodes = s_nodes(mstG.Nodes.Type(s_nodes) == "Physical");
+                    
+                    if isempty(phys_nodes)
+                        continue;
+                    end
+                    
+                    oris = mstG.Nodes.MeanOrientation(phys_nodes);
+                    areas = mstG.Nodes.Area(phys_nodes);
+                    
+                    if length(oris) == 1
+                        groupRefOris{s} = oris;
+                    else
+                        scores = zeros(length(oris), 1);
+                        for i = 1:length(oris)
+                            close_idx = angle(oris(i), oris) < (5 * degree);
+                            scores(i) = sum(close_idx) + (areas(i) / max(areas)) * 0.1;
+                        end
+                        [~, bestIdx] = max(scores);
+                        inlier_idx = angle(oris(bestIdx), oris) < (5 * degree);
+                        groupRefOris{s} = mean(oris(inlier_idx));
+                    end
+                end
+                
+                % 3. Identify Outliers and Isolated Nodes
+                all_problems = []; % [node_id, dev_val, is_outlier, depth]
+                
+                for s = 1:numStates
+                    s_nodes = find(groupIDs == s);
+                    phys_nodes = s_nodes(mstG.Nodes.Type(s_nodes) == "Physical");
+                    
+                    if length(phys_nodes) == 1
+                        v_node = phys_nodes(1);
+                        if parent_nodes(v_node) ~= 0 && ~ismember(v_node, unfixable_nodes)
+                            all_problems = [all_problems; v_node, 0, 0, depths(v_node)];
+                        end
+                    end
+                    
+                    if length(phys_nodes) <= 1 || isempty(groupRefOris{s})
+                        continue;
+                    end
+                    
+                    ref_ori = groupRefOris{s};
+                    oris = mstG.Nodes.MeanOrientation(phys_nodes);
+                    devs = angle(oris, ref_ori);
+                    
+                    outlier_idx = find(devs > 15 * degree);
+                    for k = 1:length(outlier_idx)
+                        v_node = phys_nodes(outlier_idx(k));
+                        if parent_nodes(v_node) ~= 0 && ~ismember(v_node, unfixable_nodes)
+                            all_problems = [all_problems; v_node, devs(outlier_idx(k)), 1, depths(v_node)];
+                        end
+                    end
+                end
+                
+                if isempty(all_problems)
+                    break; % Graph is stable!
+                end
+                
+                if target_node_override > 0
+                    all_problems = all_problems(all_problems(:, 1) == target_node_override, :);
+                    if isempty(all_problems)
+                        break;
+                    end
+                end
+                
+                % 4. Sort problems by depth (shallowest first)
+                [~, sort_idx] = sort(all_problems(:, 4));
+                all_problems = all_problems(sort_idx, :);
+                
+                v_node = all_problems(1, 1);
+                is_outlier = all_problems(1, 3) == 1;
+                
+                if is_outlier
+                    fprintf('\nAttempting to rewire OUTLIER Grain %d (State: %s) at depth %d...\n', v_node, unqStates{groupIDs(v_node)}, all_problems(1, 4));
+                else
+                    fprintf('\nAttempting to rewire ISOLATED Grain %d (State: %s) at depth %d...\n', v_node, unqStates{groupIDs(v_node)}, all_problems(1, 4));
+                end
+                
+                % 5. Subtree Collection
+                p_node = parent_nodes(v_node);
+                c_idx = bins(v_node);
+                comp_root = comp_roots(c_idx);
+                
+                subtree_nodes = v_node;
+                sq = v_node;
+                while ~isempty(sq)
+                    curr = sq(1); sq(1) = [];
+                    chs = find(parent_nodes == curr);
+                    if ~isempty(chs)
+                        subtree_nodes = [subtree_nodes; chs];
+                        sq = [sq; chs];
+                    end
+                end
+                
+                % Temporarily mask the old edge in search_G
+                edgeIdx1 = findedge(search_G, p_node, v_node);
+                edgeIdx2 = findedge(search_G, v_node, p_node);
+                old_w1 = Inf; old_w2 = Inf;
+                if edgeIdx1 > 0, old_w1 = search_G.Edges.Weight(edgeIdx1); search_G.Edges.Weight(edgeIdx1) = inf; end
+                if edgeIdx2 > 0, old_w2 = search_G.Edges.Weight(edgeIdx2); search_G.Edges.Weight(edgeIdx2) = inf; end
+                
+                % Find shortest path from root to ANY node in the subtree
+                [~, D] = shortestpathtree(search_G, comp_root, 'Method', 'positive');
+                
+                subtree_dists = D(subtree_nodes);
+                [min_dist, min_idx] = min(subtree_dists);
+                
+                if isinf(min_dist)
+                    fprintf('  -> FAILED: No alternative path found for Grain %d.\n', v_node);
+                    if edgeIdx1 > 0, search_G.Edges.Weight(edgeIdx1) = old_w1; end
+                    if edgeIdx2 > 0, search_G.Edges.Weight(edgeIdx2) = old_w2; end
+                    unfixable_nodes(end+1) = v_node;
+                    loop_changed = true;
                     continue;
                 end
                 
-                oris = mstG.Nodes.MeanOrientation(phys_nodes);
-                areas = mstG.Nodes.Area(phys_nodes);
+                target_node = subtree_nodes(min_idx);
+                path_nodes = shortestpath(search_G, comp_root, target_node, 'Method', 'positive');
+                new_anchor = path_nodes(end-1);
                 
-                if length(oris) == 1
-                    groupRefOris{s} = oris;
-                else
+                fprintf('  -> SUCCESS: Rewiring %d to anchor %d (target %d in subtree).\n', v_node, new_anchor, target_node);
+                
+                % 6. Mutate mstG
+                mstG = rmedge(mstG, p_node, v_node);
+                mstG = rmedge(mstG, v_node, p_node);
+                
+                % To treat virtual nodes correctly, we MUST add every missing edge
+                % along the shortest path from comp_root to target_node.
+                % This ensures that isolated virtual nodes are fully bridged back to the tree!
+                for pi = 1:length(path_nodes)-1
+                    n1 = path_nodes(pi);
+                    n2 = path_nodes(pi+1);
+                    
+                    if findedge(mstG, n1, n2) == 0 && findedge(mstG, n2, n1) == 0
+                        eIdx = findedge(search_G, n1, n2);
+                        if eIdx == 0, eIdx = findedge(search_G, n2, n1); end
+                        
+                        newEdgeRow = search_G.Edges(eIdx, :);
+                        extra_vars = setdiff(newEdgeRow.Properties.VariableNames, mstG.Edges.Properties.VariableNames);
+                        if ~isempty(extra_vars)
+                            newEdgeRow = removevars(newEdgeRow, extra_vars);
+                        end
+                        
+                        mstG = addedge(mstG, newEdgeRow);
+                    end
+                end
+                
+                if edgeIdx1 > 0, search_G.Edges.Weight(edgeIdx1) = old_w1; end
+                if edgeIdx2 > 0, search_G.Edges.Weight(edgeIdx2) = old_w2; end
+                
+                % 7. Re-propagate FZ states perfectly down the new topology!
+                mstG.Nodes.State(:) = "[]";
+                mstG = obj.resolveNodeStates(mstG);
+                
+                % Compute new deviation for debugging
+                new_state = mstG.Nodes.State(v_node);
+                [temp_unqStates, ~, temp_groupIDs] = unique(mstG.Nodes.State);
+                s_idx = find(temp_unqStates == new_state);
+                s_nodes = find(temp_groupIDs == s_idx);
+                phys_nodes = s_nodes(mstG.Nodes.Type(s_nodes) == "Physical");
+                
+                dev_val = NaN;
+                if length(phys_nodes) > 1
+                    oris = mstG.Nodes.MeanOrientation(phys_nodes);
+                    areas = mstG.Nodes.Area(phys_nodes);
                     scores = zeros(length(oris), 1);
                     for i = 1:length(oris)
                         close_idx = angle(oris(i), oris) < (5 * degree);
@@ -533,72 +763,45 @@ classdef TwinNetwork2 < handle
                     end
                     [~, bestIdx] = max(scores);
                     inlier_idx = angle(oris(bestIdx), oris) < (5 * degree);
-                    groupRefOris{s} = mean(oris(inlier_idx));
-                end
-            end
-            
-            % Identify Outliers and Isolated Nodes
-            all_outliers = [];
-            isolated_nodes = [];
-            
-            for s = 1:numStates
-                s_nodes = find(groupIDs == s);
-                phys_nodes = s_nodes(mstG.Nodes.Type(s_nodes) == "Physical");
-                
-                % Catch isolated single-node groups
-                if length(phys_nodes) == 1
-                    isolated_nodes = [isolated_nodes; phys_nodes(1)];
-                end
-                
-                if length(phys_nodes) <= 1 || isempty(groupRefOris{s})
-                    continue;
-                end
-                
-                ref_ori = groupRefOris{s};
-                oris = mstG.Nodes.MeanOrientation(phys_nodes);
-                devs = angle(oris, ref_ori);
-                
-                outlier_idx = find(devs > 15 * degree);
-                for k = 1:length(outlier_idx)
-                    v_node = phys_nodes(outlier_idx(k));
-                    all_outliers = [all_outliers; v_node, devs(outlier_idx(k))];
-                end
-            end
-            
-            if ~isempty(isolated_nodes)
-                fprintf('\n--- ISOLATED NODE DETECTED ---\n');
-                for i = 1:length(isolated_nodes)
-                    v_node = isolated_nodes(i);
-                    grp = groupIDs(v_node);
-                    state_str = unqStates{grp};
-                    fprintf('Grain %d (State: %s) is an ISOLATED NODE (Single-node group)!\n', v_node, state_str);
-                end
-                % TODO: Topological rewiring logic to attach isolated nodes to fitting groups
-            end
-            
-            if ~isempty(all_outliers)
-                warning('TwinNetwork2: Outliers detected! Outlier rewiring logic would execute here.');
-                fprintf('\n--- OUTLIER DETECTED ---\n');
-                for i = 1:size(all_outliers, 1)
-                    v_node = all_outliers(i, 1);
-                    dev_val = all_outliers(i, 2);
-                    grp = groupIDs(v_node);
-                    state_str = unqStates{grp};
+                    robust_ref = mean(oris(inlier_idx));
                     
-                    phys_in_grp = find(groupIDs == grp);
-                    phys_in_grp = phys_in_grp(mstG.Nodes.Type(phys_in_grp) == "Physical");
-                    
-                    fprintf('Grain %d (State: %s) is an OUTLIER!\n', v_node, state_str);
-                    fprintf('  -> Deviation from robust group center: %.2f deg\n', dev_val / degree);
-                    fprintf('  -> Physical grains in this group: [%s]\n', num2str(phys_in_grp(:)'));
+                    v_ori = mstG.Nodes.MeanOrientation(v_node);
+                    dev_val = angle(v_ori, robust_ref);
                 end
                 
-                % TODO: Port shortest-path topological rewiring logic from old TwinNetwork
-                % This involves disconnecting the outlier from mstG, finding a new path in obj.Graph,
-                % reconnecting, and re-running resolveNodeStates(obj, mstG) for that subtree.
+                if debug_mode
+                    % Extract variants along the path_nodes
+                    path_variants = '';
+                    for pi = 1:length(path_nodes)-1
+                        n1 = path_nodes(pi);
+                        n2 = path_nodes(pi+1);
+                        eIdx = findedge(mstG, n1, n2);
+                        if eIdx == 0, eIdx = findedge(mstG, n2, n1); end
+                        if eIdx > 0
+                            var_val = mstG.Edges.Variant(eIdx);
+                            if isnan(var_val)
+                                path_variants = [path_variants, 'NaN-'];
+                            else
+                                path_variants = [path_variants, num2str(var_val), '-'];
+                            end
+                        end
+                    end
+                    if ~isempty(path_variants)
+                        path_variants = path_variants(1:end-1);
+                    end
+                    
+                    fprintf('\n    [DEBUG] Rewiring Report for Grain %d:\n', v_node);
+                    fprintf('      - Severed Edge:  Grain %d <-> Grain %d\n', v_node, p_node);
+                    fprintf('      - New Chain:     %s\n', strjoin(string(path_nodes), ' -> '));
+                    fprintf('      - Variants along chain: %s\n', path_variants);
+                    fprintf('      - New State:     %s\n', new_state);
+                    fprintf('      - New Deviation: %.2f deg\n', dev_val / degree);
+                end
+                
+                loop_changed = true;
             end
         end
-
+        
         function Q = reduceToQuotient(obj, mstG)
             % Step E: Contract nodes with same state into quotient graph
             Q = digraph();

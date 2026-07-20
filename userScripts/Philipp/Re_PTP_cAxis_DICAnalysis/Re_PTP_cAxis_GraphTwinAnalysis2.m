@@ -175,7 +175,10 @@ network.plotGraph(mstG);
 title('Step 3: MST after FZ Propagation');
 
 disp('Step 4: Pruning and Rewiring Outliers...');
-mstG = network.pruneAndRewireOutliers(mstG);
+% mstG = network.pruneAndRewireOutliers(mstG);
+mstG = network.pruneAndRewireOutliers(mstG, 'targetNode', 56, 'debug', true);
+network.plotGraph(mstG);
+title('Step 4: MST after Pruning and Rewiring');
 
 disp('Step 5: Reducing to Quotient Graph...');
 Q = network.reduceToQuotient(mstG);
