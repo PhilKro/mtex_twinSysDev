@@ -150,8 +150,11 @@ classdef slipSystem
         slipSystem(Miller(-1,1,1,cs,'uvw'),Miller(3,2,1,cs,'hkl'),varargin{:})];
      end
     
-     function sS = hcp(varargin) %#ok<STOUT>
-       warning('There are no predefined slip systems for hcp yet. You might have to define those individually.');      
+     function sS = hcp(cs,varargin) %#ok<STOUT>
+        sS = [slipSystem.basal(cs),...
+        slipSystem.prismaticA(cs),...
+        slipSystem.pyramidalA(cs),...
+        slipSystem.pyramidal2CA(cs)];  
      end
      
     function sS = basal(cs,varargin)

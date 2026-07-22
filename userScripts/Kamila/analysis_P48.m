@@ -150,7 +150,7 @@ exportScaledFigure(gcf, fullfile(dir, [baseName, '_tagged_graph.png']))
 tN.plotGraph('type', 'untagged')
 exportScaledFigure(gcf, fullfile(dir, [baseName, '_untagged_graph.png']))
 
-%% compute quotient
+% compute quotient
 tN.computeQuotientGraph()
 tN.plotGraph('type', 'quotient')
 exportScaledFigure(gcf, fullfile(dir, [baseName, '_quotient_graph.png']))
@@ -158,7 +158,7 @@ exportScaledFigure(gcf, fullfile(dir, [baseName, '_quotient_graph.png']))
 tN.plotGraph('type', 'mst')
 exportScaledFigure(gcf, fullfile(dir, [baseName, '_mst_graph.jpg']), 'target_px', 4000, 'noDateString')
 
-%% compute parents
+% compute parents
 tN.identifyParents() 
 tN.plot()
 exportScaledFigure(gcf, fullfile(dir, [baseName, '_twin_generations.jpg']), 'target_px', 4000, 'noDateString')
