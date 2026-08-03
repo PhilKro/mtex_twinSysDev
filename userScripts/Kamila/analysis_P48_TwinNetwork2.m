@@ -162,10 +162,19 @@ mstG = network.resolveNodeStates(mstG);
 network.plotGraph(mstG);
 title('Step 3: MST after FZ Propagation');
 
+disp('Step 3.5: Plotting grains with twin generation assignment before pruning...');
+network.plot('twinsOnly', false);
+title('Step 3.5: Twin generations');
+
 % disp('Step 4: Pruning and Rewiring Outliers...');
 % mstG = network.pruneAndRewireOutliers(mstG, 'debug', true);
 % network.plotGraph(mstG);
 % title('Step 4: Pruned Graph Topology');
+
+disp('Step 4: Pruning and Rewiring Outliers...');
+mstG = network.pruneAndRewireOutliers(mstG, 'outlierMode', 'theoretical', 'maxErrThreshold', 25*degree, 'debug', true, 'rejectGenIncrease', true);
+network.plotGraph(mstG);
+title('Step 4: Pruned Graph Topology');
 
 disp('Step 5: Reducing to Quotient Graph...');
 Q = network.reduceToQuotient(mstG);

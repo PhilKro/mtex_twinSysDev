@@ -183,9 +183,10 @@ yDef = dataDef.Y(:,1)';
 % file containing that data.
 if ischar(options.sel_points_fname) || isstring(options.sel_points_fname)
     loaddata = load(options.sel_points_fname);
-    warning('pointSelectionForAlignment:UnnestingNestedDataStruct', 'The loaded data from options.sel_points_fname is expected to be a struct with a field "alignment_data_EBSD". ')
     if isfield(loaddata, 'alignment_data_EBSD')
         loaddata = loaddata.alignment_data_EBSD;
+    elseif isfield(loaddata, 'alignment_data_deformed')
+        loaddata = loaddata.alignment_data_deformed;
     end
     % reference and deformed config selection point coordinates
     fsel = loaddata.fsel;
@@ -236,10 +237,38 @@ end
 
 % plot def (1)
 ha(2) = subplot(1,Nsubplot,2);
-imagesc(xDef,yDef,defIm,'parent', ha(2));
+h_im_def = imagesc(xDef,yDef,defIm,'parent', ha(2));
 title('def (1)')
 colormap(options.colormap);
 daspect([1 1 1])
+
+% --- Add Contrast Sliders for def (1) ---
+drawnow; % ensure layout is computed
+pos2 = get(ha(2), 'Position');
+p_left = pos2(1);
+p_width = pos2(3);
+
+uicontrol('Style','text','Units','normalized','Position',[p_left, 0.04, p_width/3 - 0.01, 0.02],'String','Black','BackgroundColor','w');
+hsl_black = uicontrol('Style','slider','Units','normalized','Position',[p_left, 0.02, p_width/3 - 0.01, 0.02],'Min',0,'Max',1,'Value',0);
+
+uicontrol('Style','text','Units','normalized','Position',[p_left + p_width/3, 0.04, p_width/3 - 0.01, 0.02],'String','Gamma','BackgroundColor','w');
+hsl_gamma = uicontrol('Style','slider','Units','normalized','Position',[p_left + p_width/3, 0.02, p_width/3 - 0.01, 0.02],'Min',0.1,'Max',5,'Value',1);
+
+uicontrol('Style','text','Units','normalized','Position',[p_left + 2*p_width/3, 0.04, p_width/3 - 0.01, 0.02],'String','White','BackgroundColor','w');
+hsl_white = uicontrol('Style','slider','Units','normalized','Position',[p_left + 2*p_width/3, 0.02, p_width/3 - 0.01, 0.02],'Min',0,'Max',1,'Value',1);
+
+setappdata(ha(2), 'rawIm', defIm);
+setappdata(ha(2), 'h_im', h_im_def);
+setappdata(ha(2), 'hsl_black', hsl_black);
+setappdata(ha(2), 'hsl_white', hsl_white);
+setappdata(ha(2), 'hsl_gamma', hsl_gamma);
+setappdata(ha(2), 'grayDepth', grayDepth);
+
+update_contrast = @(src, event) updateDefContrast(ha(2));
+set(hsl_black, 'Callback', update_contrast);
+set(hsl_white, 'Callback', update_contrast);
+set(hsl_gamma, 'Callback', update_contrast);
+% ----------------------------------------
 hold on
 for k = 1:k_start-1
     plot(gsel(k,1),gsel(k,2),'or',gsel(k,1),gsel(k,2),'xb','parent', ha(2));
@@ -426,4 +455,39 @@ alignmentData.options = options;
 
 
 
+end
+
+function updateDefContrast(ax)
+    rawIm = getappdata(ax, 'rawIm');
+    h_im = getappdata(ax, 'h_im');
+    b = get(getappdata(ax, 'hsl_black'), 'Value');
+    w = get(getappdata(ax, 'hsl_white'), 'Value');
+    g = get(getappdata(ax, 'hsl_gamma'), 'Value');
+    grayDepth = getappdata(ax, 'grayDepth');
+    
+    if b >= w
+        b = w - 0.01;
+        if b < 0, b = 0; w = 0.01; end
+        set(getappdata(ax, 'hsl_black'), 'Value', b);
+        set(getappdata(ax, 'hsl_white'), 'Value', w);
+    end
+    
+    max_raw = max(rawIm(:));
+    min_raw = min(rawIm(:));
+    if max_raw == min_raw, max_raw = min_raw + 1; end
+    
+    normIm = (rawIm - min_raw) / (max_raw - min_raw);
+    
+    % Black & White mapping
+    normIm = (normIm - b) ./ (w - b);
+    normIm(normIm < 0) = 0;
+    normIm(normIm > 1) = 1;
+    
+    % Gamma mapping
+    % We use 1/g so that a higher gamma visually increases brightness
+    % or standard gamma curve:
+    normIm = normIm .^ (1/g);
+    
+    newIm = 1 + normIm * (grayDepth - 1);
+    set(h_im, 'CData', newIm);
 end

@@ -132,7 +132,7 @@ classdef TwinNetwork2 < handle
             mE2_list = meanE2_array(:).project2FundamentalRegion(grainOri2(:));
             
             % Generate variant sequences up to max generation (hardcoded to 3 for now)
-            maxGen = 3;
+            maxGen = 2;
             allSeqs = num2cell(1:obj.numVariants)';
             allMori = obj.variants(:);
             genMori = ones(obj.numVariants, 1);
@@ -331,6 +331,10 @@ classdef TwinNetwork2 < handle
             mstG = addnode(mstG, G.Nodes);
             
             EdgeTable = G.Edges;
+            if isempty(EdgeTable)
+                fprintf('No identified twin relationships!');
+                return
+            end
             EdgeTable.Weight = EdgeTable.AngularDeviation;
             
             % Add penalty to virtual edges so spanning tree prefers physical chains
@@ -380,7 +384,7 @@ classdef TwinNetwork2 < handle
             end
         end
         
-        function [localS, localT, localSeq, localDev, localVar, localE1, localE2] = extractComponentMST(obj, G_undir, compNodeIdx)
+        function [localS, localT, localSeq, localDev, localVar, localE1, localE2, localWeight] = extractComponentMST(obj, G_undir, compNodeIdx)
             subG = subgraph(G_undir, compNodeIdx);
             [subMST, ~] = minspantree(subG);
             
@@ -392,9 +396,11 @@ classdef TwinNetwork2 < handle
                 localVar = subMST.Edges.Variant;
                 localE1 = subMST.Edges.MeanEbsdOri1;
                 localE2 = subMST.Edges.MeanEbsdOri2;
+                localWeight = subMST.Edges.Weight;
             else
                 localS = []; localT = []; localSeq = {}; localDev = [];
                 localVar = []; localE1 = orientation.empty(0, 1); localE2 = orientation.empty(0, 1);
+                localWeight = [];
             end
         end
 
@@ -546,9 +552,15 @@ classdef TwinNetwork2 < handle
             p = inputParser;
             addParameter(p, 'targetNode', 0);
             addParameter(p, 'debug', false);
+            addParameter(p, 'outlierMode', 'empirical', @(x) any(validatestring(x, {'empirical', 'theoretical'})));
+            addParameter(p, 'maxErrThreshold', 15 * degree);
+            addParameter(p, 'rejectGenIncrease', false, @islogical);
             parse(p, varargin{:});
             target_node_override = p.Results.targetNode;
             debug_mode = p.Results.debug;
+            outlierMode = p.Results.outlierMode;
+            max_err_threshold = p.Results.maxErrThreshold;
+            reject_gen_increase = p.Results.rejectGenIncrease;
             
             numNodes = numnodes(mstG);
             if numNodes == 0
@@ -600,56 +612,151 @@ classdef TwinNetwork2 < handle
                     end
                 end
                 
-                % 2. Compute robust state centers
+                % 2. Compute group reference centers based on selected mode
                 [unqStates, ~, groupIDs] = unique(mstG.Nodes.State);
                 numStates = length(unqStates);
                 groupRefOris = cell(numStates, 1);
                 
-                for s = 1:numStates
-                    s_nodes = find(groupIDs == s);
-                    phys_nodes = s_nodes(mstG.Nodes.Type(s_nodes) == "Physical");
-                    
-                    if isempty(phys_nodes)
-                        continue;
+                if strcmp(outlierMode, 'empirical')
+                    for s = 1:numStates
+                        s_nodes = find(groupIDs == s);
+                        phys_nodes = s_nodes(mstG.Nodes.Type(s_nodes) == "Physical");
+                        
+                        if isempty(phys_nodes)
+                            continue;
+                        end
+                        
+                        oris = mstG.Nodes.MeanOrientation(phys_nodes);
+                        
+                        if length(oris) <= 1
+                            groupRefOris{s} = oris;
+                        else
+                            groupRefOris{s} = obj.computeRobustCenter(oris);
+                        end
                     end
+                else
+                    % Theoretical mode: Roots first
+                    root_centers = containers.Map();
+                    safe_roots = containers.Map();
                     
-                    oris = mstG.Nodes.MeanOrientation(phys_nodes);
-                    areas = mstG.Nodes.Area(phys_nodes);
-                    
-                    if length(oris) <= 1
-                        groupRefOris{s} = oris;
-                    else
-                        groupRefOris{s} = obj.computeRobustCenter(oris);
+                    % Pass 1: Extract and store root centers and safe nodes
+                    for s = 1:numStates
+                        state_str = char(unqStates{s});
+                        if endsWith(state_str, 'ROOT')
+                            s_nodes = find(groupIDs == s);
+                            phys_nodes = s_nodes(mstG.Nodes.Type(s_nodes) == "Physical");
+                            if ~isempty(phys_nodes)
+                                oris = mstG.Nodes.MeanOrientation(phys_nodes);
+                                if length(oris) <= 1
+                                    r_ori = oris;
+                                else
+                                    r_ori = obj.computeRobustCenter(oris);
+                                end
+                                
+                                parts = strsplit(state_str, '_');
+                                comp_idx_str = parts{1};
+                                root_centers(comp_idx_str) = r_ori;
+                                
+                                devs = angle(oris, r_ori);
+                                s_safe = phys_nodes(devs < max_err_threshold);
+                                if isempty(s_safe)
+                                    s_safe = phys_nodes;
+                                end
+                                safe_roots(comp_idx_str) = s_safe;
+                            end
+                        end
                     end
                 end
                 
                 % 3. Identify Outliers and Isolated Nodes
-                all_problems = []; % [node_id, dev_val, is_outlier, depth]
+                all_problems = []; % [node_id, dev_val, is_outlier, depth, closest_sr]
                 
-                for s = 1:numStates
-                    s_nodes = find(groupIDs == s);
-                    phys_nodes = s_nodes(mstG.Nodes.Type(s_nodes) == "Physical");
-                    
-                    if length(phys_nodes) == 1
-                        v_node = phys_nodes(1);
-                        if parent_nodes(v_node) ~= 0 && ~ismember(v_node, unfixable_nodes)
-                            all_problems = [all_problems; v_node, 0, 0, depths(v_node)];
+                if strcmp(outlierMode, 'empirical')
+                    for s = 1:numStates
+                        s_nodes = find(groupIDs == s);
+                        phys_nodes = s_nodes(mstG.Nodes.Type(s_nodes) == "Physical");
+                        
+                        % Empirical mode: Single nodes cannot form a consensus center, flag as isolated
+                        if length(phys_nodes) == 1
+                            v_node = phys_nodes(1);
+                            if parent_nodes(v_node) ~= 0 && ~ismember(v_node, unfixable_nodes)
+                                all_problems = [all_problems; v_node, 0, 0, depths(v_node), 0];
+                            end
+                        end
+                        
+                        if length(phys_nodes) <= 1 || isempty(groupRefOris{s})
+                            continue;
+                        end
+                        
+                        ref_ori = groupRefOris{s};
+                        oris = mstG.Nodes.MeanOrientation(phys_nodes);
+                        devs = angle(oris, ref_ori);
+                        
+                        outlier_idx = find(devs > max_err_threshold);
+                        for k = 1:length(outlier_idx)
+                            v_node = phys_nodes(outlier_idx(k));
+                            if parent_nodes(v_node) ~= 0 && ~ismember(v_node, unfixable_nodes)
+                                all_problems = [all_problems; v_node, devs(outlier_idx(k)), 1, depths(v_node), 0];
+                            end
                         end
                     end
-                    
-                    if length(phys_nodes) <= 1 || isempty(groupRefOris{s})
-                        continue;
-                    end
-                    
-                    ref_ori = groupRefOris{s};
-                    oris = mstG.Nodes.MeanOrientation(phys_nodes);
-                    devs = angle(oris, ref_ori);
-                    
-                    outlier_idx = find(devs > 15 * degree);
-                    for k = 1:length(outlier_idx)
-                        v_node = phys_nodes(outlier_idx(k));
-                        if parent_nodes(v_node) ~= 0 && ~ismember(v_node, unfixable_nodes)
-                            all_problems = [all_problems; v_node, devs(outlier_idx(k)), 1, depths(v_node)];
+                else
+                    % Theoretical mode: No such thing as isolated! Every state has a theoretical center.
+                    for s = 1:numStates
+                        s_nodes = find(groupIDs == s);
+                        phys_nodes = s_nodes(mstG.Nodes.Type(s_nodes) == "Physical");
+                        
+                        if isempty(phys_nodes)
+                            continue;
+                        end
+                        
+                        state_str = char(unqStates{s});
+                        parts = strsplit(state_str, '_');
+                        comp_idx_str = parts{1};
+                        
+                        if ~safe_roots.isKey(comp_idx_str)
+                            continue;
+                        end
+                        
+                        s_safe = safe_roots(comp_idx_str);
+                        
+                        for p_idx = 1:length(phys_nodes)
+                            v_node = phys_nodes(p_idx);
+                            if ismember(v_node, unfixable_nodes) || parent_nodes(v_node) == 0
+                                continue;
+                            end
+                            
+                            if length(s_safe) == 1
+                                closest_sr = s_safe(1);
+                            else
+                                v_cent = mstG.Nodes.Centroid(v_node, :);
+                                s_cents = mstG.Nodes.Centroid(s_safe, :);
+                                D_sq = (s_cents(:,1) - v_cent(1)).^2 + (s_cents(:,2) - v_cent(2)).^2;
+                                [~, min_idx] = min(D_sq);
+                                closest_sr = s_safe(min_idx);
+                            end
+                            
+                            theoOri = mstG.Nodes.MeanOrientation(closest_sr);
+                            for v_idx = 2:length(parts)
+                                if strcmp(parts{v_idx}, 'ROOT')
+                                    continue;
+                                end
+                                variant_idx = str2double(parts{v_idx});
+                                theoOri = theoOri * obj.variants(variant_idx);
+                            end
+
+                            if v_node == 15
+                                disp('Is 15 a problem? Its root node is: ')
+                                disp(closest_sr)
+                                disp('. All safe roots are: ')
+                                disp(s_safe)
+                                % keyboard; % DEBUG HALT: Inspect theoOri and parts before it gets flagged!
+                            end
+
+                            dev_val = angle(mstG.Nodes.MeanOrientation(v_node), theoOri);
+                            if dev_val > max_err_threshold
+                                all_problems = [all_problems; v_node, dev_val, 1, depths(v_node), closest_sr];
+                            end
                         end
                     end
                 end
@@ -689,11 +796,20 @@ classdef TwinNetwork2 < handle
                     is_outlier = all_problems(p_idx, 3) == 1;
                 
                 if is_outlier
-                    fprintf('\nAttempting to rewire OUTLIER Grain %d (State: %s) at depth %d...\n', v_node, unqStates{groupIDs(v_node)}, all_problems(1, 4));
+                    if strcmp(outlierMode, 'theoretical')
+                        fprintf('\nAttempting to rewire OUTLIER Grain %d (State: %s) at depth %d with deviation %.2f deg to its theoretical orientation as calculated from the closest safe root Grain %d...\n', ...
+                            v_node, unqStates{groupIDs(v_node)}, all_problems(p_idx, 4), all_problems(p_idx, 2)/degree, all_problems(p_idx, 5));
+                    else
+                        fprintf('\nAttempting to rewire OUTLIER Grain %d (State: %s) at depth %d...\n', v_node, unqStates{groupIDs(v_node)}, all_problems(p_idx, 4));
+                    end
                 else
-                    fprintf('\nAttempting to rewire ISOLATED Grain %d (State: %s) at depth %d...\n', v_node, unqStates{groupIDs(v_node)}, all_problems(1, 4));
+                    fprintf('\nAttempting to rewire ISOLATED Grain %d (State: %s) at depth %d...\n', v_node, unqStates{groupIDs(v_node)}, all_problems(p_idx, 4));
                 end
                 
+                if v_node == 16
+                    disp('Halt stop')
+                end
+
                 % 5. Subtree Collection & Component Identification
                 p_node = parent_nodes(v_node);
                 c_idx = bins(v_node);
@@ -725,10 +841,55 @@ classdef TwinNetwork2 < handle
                 masked_fallback_weights = [];
                 
                 for fallback_iter = 1:10
-                    % Extract the MST for this component using the masked search_G
-                    [localS, localT, localSeq, localDev, localVar, localE1, localE2] = obj.extractComponentMST(search_G, compNodeIdx);
+                    % Bias search_G to strongly prefer the CURRENT topology (mstG)
+                    % This prevents zero-weight edges from arbitrarily shuffling and destroying geometric safe roots!
+                    bias_val = 1e-6;
+                    search_G.Edges.Weight = search_G.Edges.Weight + bias_val;
                     
-                    if isempty(localS) || any(isinf(localDev))
+                    for e_idx = 1:numedges(search_G)
+                        s_g = search_G.Edges.EndNodes(e_idx, 1);
+                        t_g = search_G.Edges.EndNodes(e_idx, 2);
+                        if findedge(mstG, s_g, t_g) > 0 && search_G.Edges.Weight(e_idx) < inf
+                            search_G.Edges.Weight(e_idx) = search_G.Edges.Weight(e_idx) - bias_val;
+                        end
+                    end
+                    
+                    % Extract the MST for this component using the stabilized search_G
+                    [localS, localT, localSeq, localDev, localVar, localE1, localE2, localWeight] = obj.extractComponentMST(search_G, compNodeIdx);
+                    
+                    % Remove the bias to restore search_G mathematically
+                    for e_idx = 1:numedges(search_G)
+                        s_g = search_G.Edges.EndNodes(e_idx, 1);
+                        t_g = search_G.Edges.EndNodes(e_idx, 2);
+                        if findedge(mstG, s_g, t_g) > 0 && search_G.Edges.Weight(e_idx) < inf
+                            search_G.Edges.Weight(e_idx) = search_G.Edges.Weight(e_idx) + bias_val;
+                        end
+                    end
+                    search_G.Edges.Weight = search_G.Edges.Weight - bias_val;
+                    
+                    if isempty(localS)
+                        if debug_mode
+                            fprintf('    [DEBUG] Iter %d: Subtree is fundamentally disconnected (no finite paths left). Aborting fallback.\n', fallback_iter);
+                        end
+                        break;
+                    end
+                    
+                    % Find the edge bridging the subtree and main tree in the NEW MST
+                    bridge_s = 0; bridge_t = 0; bridge_w = 0;
+                    for ei = 1:length(localS)
+                        g_s = compNodeIdx(localS(ei));
+                        g_t = compNodeIdx(localT(ei));
+                        is_s_in_sub = ismember(g_s, subtree_nodes);
+                        is_t_in_sub = ismember(g_t, subtree_nodes);
+                        if is_s_in_sub ~= is_t_in_sub
+                            bridge_s = g_s;
+                            bridge_t = g_t;
+                            bridge_w = localWeight(ei);
+                            break;
+                        end
+                    end
+                    
+                    if isinf(bridge_w)
                         if debug_mode
                             fprintf('    [DEBUG] Iter %d: Subtree is fundamentally disconnected (no finite paths left). Aborting fallback.\n', fallback_iter);
                         end
@@ -761,20 +922,64 @@ classdef TwinNetwork2 < handle
                     % Compute robust center for the new state to check deviation
                     % [temp_unqStates, ~, temp_groupIDs] = unique(temp_mstG.Nodes.State);
                     % s_idx = find(temp_unqStates == new_state);
-                    % s_nodes = find(temp_groupIDs == s_idx);
-                    % phys_nodes = s_nodes(temp_mstG.Nodes.Type(s_nodes) == "Physical");
                     phys_nodes = find(temp_mstG.Nodes.State == new_state & temp_mstG.Nodes.Type == "Physical");
                     
                     dev_val = inf;
-                    if length(phys_nodes) > 1
-                        oris = temp_mstG.Nodes.MeanOrientation(phys_nodes);
-                        robust_ref = obj.computeRobustCenter(oris);
-                        
-                        v_ori = temp_mstG.Nodes.MeanOrientation(v_node);
-                        dev_val = angle(v_ori, robust_ref);
+                    if strcmp(outlierMode, 'empirical')
+                        if length(phys_nodes) > 1
+                            oris = temp_mstG.Nodes.MeanOrientation(phys_nodes);
+                            robust_ref = obj.computeRobustCenter(oris);
+                            
+                            v_ori = temp_mstG.Nodes.MeanOrientation(v_node);
+                            dev_val = angle(v_ori, robust_ref);
+                        end
+                    else
+                        % Theoretical mode: Calculate deviation against closest safe root
+                        new_state_char = char(new_state);
+                        parts = strsplit(new_state_char, '_');
+                        comp_idx_str = parts{1};
+                        if safe_roots.isKey(comp_idx_str)
+                            s_safe = safe_roots(comp_idx_str);
+                            if length(s_safe) == 1
+                                closest_sr = s_safe(1);
+                            else
+                                v_cent = temp_mstG.Nodes.Centroid(v_node, :);
+                                s_cents = temp_mstG.Nodes.Centroid(s_safe, :);
+                                D_sq = (s_cents(:,1) - v_cent(1)).^2 + (s_cents(:,2) - v_cent(2)).^2;
+                                [~, min_idx] = min(D_sq);
+                                closest_sr = s_safe(min_idx);
+                            end
+                            
+                            theoOri = temp_mstG.Nodes.MeanOrientation(closest_sr);
+                            for v_idx = 2:length(parts)
+                                if strcmp(parts{v_idx}, 'ROOT')
+                                    continue;
+                                end
+                                variant_idx = str2double(parts{v_idx});
+                                theoOri = theoOri * obj.variants(variant_idx);
+                            end
+                            v_ori = temp_mstG.Nodes.MeanOrientation(v_node);
+                            dev_val = angle(v_ori, theoOri);
+                        end
                     end
                     
-                    if dev_val < 15 * degree
+                    % Determine generation for the old and new states
+                    old_state = mstG.Nodes.State(v_node);
+                    old_parts = strsplit(char(old_state), '_');
+                    old_gen = length(old_parts) - 1;
+                    if strcmp(old_parts{end}, 'ROOT')
+                        old_gen = 0;
+                    end
+                    
+                    new_parts = strsplit(char(new_state), '_');
+                    new_gen = length(new_parts) - 1;
+                    if strcmp(new_parts{end}, 'ROOT')
+                        new_gen = 0;
+                    end
+                    
+                    gen_increased = new_gen > old_gen;
+                    
+                    if dev_val < max_err_threshold && ~(reject_gen_increase && gen_increased)
                         fallback_success = true;
                         
                         if debug_mode
@@ -790,22 +995,15 @@ classdef TwinNetwork2 < handle
                         break;
                     else
                         if debug_mode
-                            fprintf('    [DEBUG] Iter %d FAILED validation:\n', fallback_iter);
-                            fprintf('      - Resulting State: %s\n', new_state);
-                            fprintf('      - Deviation: %.2f deg (Exceeds 15 deg threshold!)\n', dev_val / degree);
-                        end
-                        
-                        % Find the edge bridging the subtree and main tree in the NEW MST
-                        bridge_s = 0; bridge_t = 0;
-                        for ei = 1:length(localS)
-                            g_s = compNodeIdx(localS(ei));
-                            g_t = compNodeIdx(localT(ei));
-                            is_s_in_sub = ismember(g_s, subtree_nodes);
-                            is_t_in_sub = ismember(g_t, subtree_nodes);
-                            if is_s_in_sub ~= is_t_in_sub
-                                bridge_s = g_s;
-                                bridge_t = g_t;
-                                break;
+                            if reject_gen_increase && gen_increased && dev_val < max_err_threshold
+                                fprintf('    [DEBUG] Iter %d FAILED validation (Generation increase rejected!):\n', fallback_iter);
+                                fprintf('      - Original State: %s (Gen %d)\n', old_state, old_gen);
+                                fprintf('      - Resulting State: %s (Gen %d)\n', new_state, new_gen);
+                                fprintf('      - Deviation: %.2f deg (Passed %.2f deg threshold)\n', dev_val/degree, max_err_threshold/degree);
+                            else
+                                fprintf('    [DEBUG] Iter %d FAILED validation:\n', fallback_iter);
+                                fprintf('      - Resulting State: %s\n', new_state);
+                                fprintf('      - Deviation: %.2f deg (Exceeds %.2f deg threshold!)\n', dev_val/degree, max_err_threshold/degree);
                             end
                         end
                         

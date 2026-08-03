@@ -75,14 +75,16 @@ function exportScaledFigure(fig, fname, varargin)
     end
     fig.Position(3:4) = pos(3:4) * scale;
 
+    % --- Compute actual export size in pixels (while units are inches) ---
+    width_px  = round(fig.Position(3) * dpi);
+    height_px = round(fig.Position(4) * dpi);
+
+    % --- Export while figure units are inches for precise DPI scaling ---
+    exportgraphics(fig, fname, 'Resolution', dpi);
+
     % --- Restore units ---
     fig.Units = oldUnits;
 
-    % --- Export ---
-    exportgraphics(fig, fname, 'Resolution', dpi);
-
     % --- Report actual export size ---
-    width_px  = round(fig.Position(3) * dpi);
-    height_px = round(fig.Position(4) * dpi);
     fprintf('Exported %s at %dx%d px (%d dpi)\n', fname, width_px, height_px, dpi);
 end

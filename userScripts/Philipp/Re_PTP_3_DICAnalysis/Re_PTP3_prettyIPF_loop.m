@@ -1,4 +1,4 @@
-%% Re_PTP3_prettyIPF_loop.m
+N:\Vol1-Th\Analytik\Personal\Philipp Vol1 Analy Personal\Titanium\Ti_cAxis_PTP_2\DIC exported data\Processing_subset=21_step=5%% Re_PTP3_prettyIPF_loop.m
 % Script to loop over Re_PTP_3 .ang files and generate pretty IPF Y maps
 % overlaid on a tunable greyscale Confidence Index (CI) background.
 

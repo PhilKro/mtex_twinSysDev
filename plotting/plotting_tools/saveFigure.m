@@ -22,8 +22,10 @@ if nargin == 0
   fname = [pathstr,name];
 end
 
-% seperate extension
-[~, ~, ext] = fileparts(fname);
+% Sanitize illegal OS filename characters from basename (keeps directory path intact)
+[p_dir, f_base, ext] = fileparts(fname);
+f_base = regexprep(f_base, '[\\/:*?"<>|]', '_');
+fname = fullfile(p_dir, [f_base, ext]);
 
 if any(strcmpi(ext,{'.pdf','.eps','.ps'}))
   
@@ -67,18 +69,27 @@ if any(strcmpi(ext,{'.pdf','.eps','.ps'}))
     unix(['LD_LIBRARY_PATH="" && pdfcrop' ' ' fname ' ' fname]); 
   end
   
-else % use export_fig with 50% magnification
+else % use modern exportgraphics or fallback to export_fig
 
   try
     oldColor = get(gcf,'color');
     set(gcf,'color',get(gca,'color'));
-    % prevent smoothing and aliasing on map plot: no new colors should be generated
     if isa(getappdata(gca,'mapPlot'),'mapPlot')
       set(gcf,'GraphicsSmoothing','off');
-      export_fig(gcf,fname,'-m2.5','-a1');
-    else
-      export_fig(gcf,fname,'-m1.5');
     end
+
+    % Attempt modern native exportgraphics first (R2020a+)
+    try
+      exportgraphics(gcf, fname, 'Resolution', 300);
+    catch
+      % Fallback to legacy export_fig if exportgraphics is unavailable/fails
+      if isa(getappdata(gca,'mapPlot'),'mapPlot')
+        export_fig(gcf,fname,'-m2.5','-a1');
+      else
+        export_fig(gcf,fname,'-m1.5');
+      end
+    end
+
     if exist(fname,'file')
       set(gcf,'color',oldColor);
       return;
