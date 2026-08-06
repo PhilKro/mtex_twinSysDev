@@ -22,7 +22,7 @@ function [registry, defaults] = a00_Dataset_Registry()
     defaults.numy           = 2500; 
     defaults.tkd_tilt       = -7 * degree;
     defaults.thresh_ci      = 0.1;
-    defaults.refOrientationEulerAngles = [358,86,184]*degree;
+    defaults.refOrientationEulerAngles = [358,86,184]*degree; %TBD, but its probably better to use the orientaiton of the twin grain [254.683 3.75291 281.787] *degree
 
     %% Dataset Registry
     % Complete timeline of SE images, EBSD/TKD scans, and HDF5 DIC groups.

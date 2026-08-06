@@ -128,7 +128,7 @@ fprintf('=======================================================================
 %% ========================================================================
 %  PHASE 2: UNATTENDED HEAVY COMPUTATION & EULERIAN FORWARD WARPING
 % =========================================================================
-for stepIdx = 1:numel(defSteps)
+for stepIdx = 2%1:numel(defSteps)
     defStep = defSteps(stepIdx);
     fprintf('\n------------------------------------------------------------------------\n');
     fprintf('[PHASE 2] Executing Forward Warping for Step: %s (%d/%d)\n', defStep.stepName, stepIdx, numel(defSteps));
@@ -284,6 +284,106 @@ for stepIdx = 1:numel(defSteps)
         rawData.DIC.(shortName) = subdata;
         rawData.DIC.names{end+1} = shortName;
     end
+
+    % %% ====================================================================
+    % %  [TROUBLESHOOTING BLOCK] SINGLE-FIELD (uy) FORWARD WARPING EVALUATION
+    % %  ====================================================================
+    % %  Comment out or remove this block once the proper warping formula is verified!
+    % fprintf('\n[TROUBLESHOOTING MODE] Isolating forward warping on single test field (uy)...\n');
+    % dicNames_ts = rawData.DIC.names;
+    % ux_idx_ts = find(contains(dicNames_ts, 'x_displacement', 'IgnoreCase', true), 1);
+    % uy_idx_ts = find(contains(dicNames_ts, 'y_displacement', 'IgnoreCase', true), 1);
+    % 
+    % if ~isempty(ux_idx_ts) && ~isempty(uy_idx_ts)
+    %     ux_ts = double(rawData.DIC.(dicNames_ts{ux_idx_ts}));
+    %     uy_ts = double(rawData.DIC.(dicNames_ts{uy_idx_ts}));
+    %     test_field = uy_ts; % We isolate uy for rapid diagnostics
+    %     test_name  = dicNames_ts{uy_idx_ts};
+    % 
+    %     % Check spatial coordinate alignment and report diagnostics
+    %     fprintf('  -> Diagnostics: SE_raw X range [%.2f, %.2f] | DIC uy size [%d, %d] | newEBSD size [%d, %d]\n', ...
+    %             min(rawData.SE_raw.X(:)), max(rawData.SE_raw.X(:)), size(uy_ts,1), size(uy_ts,2), size(newEBSD,1), size(newEBSD,2));
+    % 
+    %     valid_ts = ~isnan(rawData.SE_raw.X(:)) & ~isnan(rawData.SE_raw.Y(:)) & ~isnan(test_field(:));
+    %     V_flat_ts = test_field(valid_ts);
+    % 
+    %     % --- Build 4 Warping Hypotheses ---
+    %     tStart = tic
+    %     n = 4;
+    %     T = zeros(1,n);
+    %     % 1. Un-warped Baseline
+    %     F1 = scatteredInterpolant(rawData.SE_raw.X(valid_ts), rawData.SE_raw.Y(valid_ts), V_flat_ts, 'linear', 'none');
+    %     uy_out1 = F1(newEBSD.x, newEBSD.y);
+    %     T(1)= toc
+    %     % 2. Standard Forward Warping (Current: X + ux, Y + uy)
+    %     X_fwd2 = rawData.SE_raw.X(valid_ts) + ux_ts(valid_ts);
+    %     Y_fwd2 = rawData.SE_raw.Y(valid_ts) + uy_ts(valid_ts);
+    %     F2 = scatteredInterpolant(X_fwd2, Y_fwd2, V_flat_ts, 'linear', 'none');
+    %     uy_out2 = F2(newEBSD.x, newEBSD.y);
+    %     T(2)= toc
+    %     % 3. Y-Polarity Inverted Warping (X + ux, Y - uy) [Hypothesis 1: DaVis Y vs MTEX Y flip]
+    %     Y_fwd3 = rawData.SE_raw.Y(valid_ts) - uy_ts(valid_ts);
+    %     F3 = scatteredInterpolant(X_fwd2, Y_fwd3, V_flat_ts, 'linear', 'none');
+    %     uy_out3 = F3(newEBSD.x, newEBSD.y);
+    %     T(3)= toc
+    %     % 4. Full Sign Inverted Warping (X - ux, Y - uy) [Hypothesis 2: Reference vs Target inversion]
+    %     X_fwd4 = rawData.SE_raw.X(valid_ts) - ux_ts(valid_ts);
+    %     Y_fwd4 = rawData.SE_raw.Y(valid_ts) - uy_ts(valid_ts);
+    %     F4 = scatteredInterpolant(X_fwd4, Y_fwd4, V_flat_ts, 'linear', 'none');
+    %     uy_out4 = F4(newEBSD.x, newEBSD.y);
+    %     T(4)= toc
+    %     % --- Render Comparative 2x2 Overlay Studio ---
+    %     try
+    %         bg_ts = double(newEBSD.prop.SE_raw);
+    %     catch
+    %         try, bg_ts = double(newEBSD.ci); catch, bg_ts = ones(size(newEBSD)); end
+    %     end
+    % 
+    %     % fig_ts = figure('Name', sprintf('DIC Warping Diagnostics | Step: %s | Field: %s', defStep.stepName, test_name), ...
+    %     %                 'Color', 'w', 'Position', [50, 50, 1400, 900]);
+    %     % 
+    %     % hyp_data = {uy_out1, uy_out2, uy_out3, uy_out4};
+    %     % hyp_titles = {'1. Un-warped Baseline (X_raw, Y_raw)', ...
+    %     %               '2. Standard Forward (X+ux, Y+uy) [CURRENT]', ...
+    %     %               '3. Y-Polarity Inversion (X+ux, Y-uy) [HYPOTHESIS 1]', ...
+    %     %               '4. Full Sign Inversion (X-ux, Y-uy) [HYPOTHESIS 2]'};
+    %     % hyp_colors = {[0 0 0], [0.8 0 0], [0 0.5 0], [0 0 0.8]};
+    %     % ax_list = gobjects(1, 4);
+    %     % 
+    %     % for idx = 1:4
+    %     %     ax_list(idx) = subplot(2, 2, idx, 'Parent', fig_ts);
+    %     % 
+    %     %     % Plot grayscale SE_raw background natively via MTEX
+    %     %     plot(newEBSD, bg_ts, 'parent', ax_list(idx));
+    %     %     colormap(ax_list(idx), gray);
+    %     %     caxis(ax_list(idx), prctile(bg_ts(:), [1 99]));
+    %     %     hold(ax_list(idx), 'on');
+    %     % 
+    %     %     % Plot DIC overlay with alpha natively via MTEX
+    %     %     h = plot(newEBSD, hyp_data{idx}, 'parent', ax_list(idx));
+    %     %     try set(h, 'FaceAlpha', 0.55); catch; try set(h, 'AlphaData', 0.55); catch; end; end
+    %     % 
+    %     %     mtexColorMap(ax_list(idx), 'parula');
+    %     % 
+    %     %     % Set titles and labels
+    %     %     title(ax_list(idx), hyp_titles{idx}, 'FontSize', 12, 'FontWeight', 'bold', 'Color', hyp_colors{idx});
+    %     %     xlabel(ax_list(idx), 'x [\mum]'); ylabel(ax_list(idx), 'y [\mum]');
+    %     % end
+    %     % 
+    %     % linkaxes(ax_list, 'xy');
+    %     % drawnow;
+    %     figure; plot(newEBSD, uy_out1); title('out1'); figure; plot(newEBSD, uy_out2); title('out2'); figure; plot(newEBSD, uy_out3); title('out3'); figure; plot(newEBSD, uy_out4); title('out4');
+    %     fprintf('\n====================================================================\n');
+    %     fprintf('  TROUBLESHOOTING PAUSE ACTIVE:\n');
+    %     fprintf('  Compare the alignment of localization bands in subplots 2, 3, and 4\n');
+    %     fprintf('  against physical grain features on the underlying SE image.\n');
+    %     fprintf('  Type "return" or press Ctrl+C to continue or modify code.\n');
+    %     fprintf('====================================================================\n');
+    %     keyboard; % Breakpoint for experimentalist verification
+    % else
+    %     warning('Could not find ux or uy displacement fields for troubleshooting block.');
+    % end
+    % % ====================================================================
 
     %% Eulerian Forward Warping (Optimized with Delaunay Caching)
     dicNames = rawData.DIC.names;
@@ -496,10 +596,11 @@ for stepIdx = 1:numel(defSteps)
         close(fig_grad);
         fprintf('  -> Saved 4-Panel Displacement Gradient Check figure to: %s\n', gradOutName);
     end
-
+    if false
     finalOutName = fullfile(input.outPath, [defStep.stepName, '_deformedEBSD_withForwardDIC.mat']);
     save(finalOutName, 'newEBSD', 'originalEBSD', 'grains', 'options', 'defStep');
     fprintf('  -> Saved complete FZ-projected dataset & grain object to: %s\n', finalOutName);
+    end
 end
 fprintf('\n========================================================================\n');
 fprintf('ALL DEFORMED FORWARD DATASETS COMPUTED AND SAVED SUCCESSFULLY!\n');

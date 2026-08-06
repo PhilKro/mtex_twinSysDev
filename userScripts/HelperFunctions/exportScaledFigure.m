@@ -18,73 +18,77 @@ function exportScaledFigure(fig, fname, varargin)
 %       exportScaledFigure(f, 'myplot.png', 'noDateString')
 %       % → myplot.png
 
-    % --- Defaults ---
-    target_px = 1500;
-    dpi = 300;
-    addDateString = true;
-    extraheight = false;
-    extrawidth = false;
-    % --- Parse optional inputs ---
+    % --- Modern Argument Validation & Default Setup ---
+    p = inputParser;
+    p.CaseSensitive = false;
+    addRequired(p, 'fig', @(x) isgraphics(x, 'figure') || isgraphics(x, 'axes'));
+    addRequired(p, 'fname', @(x) ischar(x) || isstring(x));
+    addParameter(p, 'target_px', 1500, @(x) isnumeric(x) && isscalar(x) && x > 0);
+    addParameter(p, 'dpi', 300, @(x) isnumeric(x) && isscalar(x) && x > 0);
+    addParameter(p, 'nodatestring', false, @(x) islogical(x) || (isnumeric(x) && isscalar(x)));
+    addParameter(p, 'extraheight', false, @(x) islogical(x) || (isnumeric(x) && isscalar(x)));
+    addParameter(p, 'extrawidth', false, @(x) islogical(x) || (isnumeric(x) && isscalar(x)));
+    
+    % Support keyword-only flags like 'nodatestring', 'extraheight' passed as single arguments
+    customArgs = varargin;
     k = 1;
-    while k <= numel(varargin)
-        switch lower(varargin{k})
-            case 'target_px'
-                target_px = varargin{k+1};
-                k = k + 1;
-            case 'dpi'
-                dpi = varargin{k+1};
-                k = k + 1;
-            case 'nodatestring'
-                addDateString = false;
-            case 'extraheight'
-                extraheight = true;
-            case 'extrawidth'
-                extrawidth = true;
-            otherwise
-                error('Unknown option: %s', varargin{k});
+    while k <= numel(customArgs)
+        if ischar(customArgs{k}) || isstring(customArgs{k})
+            key = lower(char(customArgs{k}));
+            if ismember(key, {'nodatestring', 'extraheight', 'extrawidth'})
+                if k == numel(customArgs) || ischar(customArgs{k+1}) || isstring(customArgs{k+1})
+                    customArgs = [customArgs(1:k), {true}, customArgs(k+1:end)];
+                end
+            end
         end
         k = k + 1;
     end
+    parse(p, fig, fname, customArgs{:});
+    opts = p.Results;
 
-    % --- Add datetime string if enabled ---
+    % --- Resolve Filepath & Ensure Directory Structure Exists ---
+    fname = char(opts.fname);
     [filepath, name, ext] = fileparts(fname);
-    if isempty(ext)
-        ext = '.png'; % default extension
+    if isempty(ext), ext = '.png'; end
+    if ~opts.nodatestring
+        dtstr = string(datetime('now', 'Format', 'MM_dd_HH_mm_ss'));
+        name = char(name + "_" + dtstr);
     end
-    if addDateString
-        dtstr = string(datetime('now','Format','MM_dd_HH_mm_ss'));
-        name = name + "_" + dtstr;
+    if ~isempty(filepath) && ~exist(filepath, 'dir')
+        mkdir(filepath);
     end
-    fname = fullfile(filepath, append(name, ext));
+    fname = fullfile(filepath, [name, ext]);
 
-    % --- Compute target size in inches ---
-    target_in = target_px / dpi;
-
-    % --- Read current figure size in inches ---
+    % --- Exception-Safe Figure Unit Preservation ---
     oldUnits = fig.Units;
+    cleanupObj = onCleanup(@() set(fig, 'Units', oldUnits));
     fig.Units = 'inches';
-    pos = fig.Position;   % [x, y, width, height] in inches
+    pos = fig.Position; % [x, y, width, height] in inches
 
-    % --- Scale so shorter side = target_in ---
+    % --- MATHEMATICAL SOUNDNESS FIX: Apply Aspect Ratio Modifiers FIRST ---
+    % Any modification to height or width must precede scale calculation,
+    % otherwise changing dimensions can flip which side is shortest, invalidating target_in.
+    if opts.extraheight
+        pos(4) = pos(4) * 1.3;
+    elseif opts.extrawidth
+        pos(3) = pos(3) * 1.3;
+    end
+    
+    % --- Calculate Precise Scale Factor for Shorter Side ---
+    target_in = opts.target_px / opts.dpi;
     shorter_side = min(pos(3:4));
     scale = target_in / shorter_side;
-    if extraheight
-        pos(4)= pos(4)*1.3;
-    elseif extrawidth
-        pos(3)= pos(3)*1.3;
-    end
+    
     fig.Position(3:4) = pos(3:4) * scale;
 
-    % --- Compute actual export size in pixels (while units are inches) ---
-    width_px  = round(fig.Position(3) * dpi);
-    height_px = round(fig.Position(4) * dpi);
+    % --- Compute actual export dimensions in pixels ---
+    width_px  = round(fig.Position(3) * opts.dpi);
+    height_px = round(fig.Position(4) * opts.dpi);
 
-    % --- Export while figure units are inches for precise DPI scaling ---
-    exportgraphics(fig, fname, 'Resolution', dpi);
+    % --- Export via modern high-resolution engine ---
+    drawnow; % Realize window transformations before capturing raster
+    exportgraphics(fig, fname, 'Resolution', opts.dpi);
 
-    % --- Restore units ---
-    fig.Units = oldUnits;
-
-    % --- Report actual export size ---
-    fprintf('Exported %s at %dx%d px (%d dpi)\n', fname, width_px, height_px, dpi);
+    % --- Report export telemetry (cleanupObj automatically restores fig.Units upon return) ---
+    fprintf('Exported %s at %dx%d px (%d dpi)\n', fname, width_px, height_px, opts.dpi);
 end
