@@ -185,6 +185,8 @@ for idx_step = 1:length(sel_indices)
         fprintf('  -> Archived combined domain dataset to disk:\n     %s\n', mat_cache_path);
     end
 
+    % change scan unit to nm
+    ebsd_grid.scanUnit = 'nm';
     %% 4. Launch Functional Presentation Studio with Persistent State
     fprintf('------------------------------------------------------------------------\n');
     fprintf('LAUNCHING INTERACTIVE STUDIO [%d/%d]: %s\n', idx_step, length(sel_indices), baseName);

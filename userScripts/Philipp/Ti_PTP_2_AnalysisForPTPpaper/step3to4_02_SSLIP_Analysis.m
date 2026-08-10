@@ -360,6 +360,16 @@ for i_i = 1:length(prefix_list)
             b_col    = arrayfun(@(x) x.b.char, sS_filt(:), 'UniformOutput', false);
             n_col    = arrayfun(@(x) x.n.char, sS_filt(:), 'UniformOutput', false);
             
+            num_acts = length(acts_col);
+            num_sys  = length(sS_filt);
+            if num_acts > num_sys
+                for i_ex = num_sys+1:num_acts
+                    b_col{i_ex, 1} = 'Rotation';
+                    n_col{i_ex, 1} = 'N/A';
+                    SF_col(i_ex, 1) = NaN;
+                end
+            end
+            
             T_sys = table(id_col, b_col, n_col, SF_col, acts_col, ...
                           'VariableNames', {'SlipSystem_ID', 'Burgers_Vector_b', 'Plane_Normal_n', 'Schmid_Factor', 'Mean_Shear_Activity'});
             writetable(T_sys, fullfile(outDir, [plotBaseName, '_SlipSystems.csv']));
@@ -392,7 +402,7 @@ for i_i = 1:length(prefix_list)
             
             fprintf('   -> Complete! Combined Error Index: %.6f | Correlation Rate: %.1f%%\n', m_res, corr_rate);
         catch ME
-            fprintf(2, '   [ERROR] SSLIP processing failed for Grain %d in increment %s:\n      %s\n', grainId, prefix, ME.message);
+            fprintf(2, '   [ERROR] SSLIP processing failed for Grain %d in increment %s:\n%s\n', grainId, prefix, getReport(ME));
             for stk_i = 1:length(ME.stack)
                 fprintf(2, '      in %s (line %d)\n', ME.stack(stk_i).name, ME.stack(stk_i).line);
             end

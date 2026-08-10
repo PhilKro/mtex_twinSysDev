@@ -2,19 +2,19 @@
 close all
 clear all
 
-% Ti PTP_1
-ebsd_dir = 'N:\EBSD-Analysis-2\Philipp_EBSD_analysis2\0007_Ti_cAxis_PTP_1\h5oina';
-dic_dir  = 'N:\Vol1-Th\Analytik\Personal\Philipp Vol1 Analy Personal\Titanium\Ti_cAxis_PTP_1\test\DIC';
-dic_vid_dir = 'N:\Vol1-Th\Analytik\Personal\Philipp Vol1 Analy Personal\Titanium\Ti_cAxis_PTP_1\test\DIC\DIC continual';
-filename = 'N:\Vol1-Th\Analytik\Personal\Philipp Vol1 Analy Personal\Titanium\Ti_cAxis_PTP_1\test\AMICS\insitu tkd Ti_caxis_1 2025.10.06-11.04.44.989049_000.tdms';
-drift_time_val = 132;
+% % Ti PTP_1
+% ebsd_dir = 'N:\EBSD-Analysis-2\Philipp_EBSD_analysis2\0007_Ti_cAxis_PTP_1\h5oina';
+% dic_dir  = 'N:\Vol1-Th\Analytik\Personal\Philipp Vol1 Analy Personal\Titanium\Ti_cAxis_PTP_1\test\DIC';
+% dic_vid_dir = 'N:\Vol1-Th\Analytik\Personal\Philipp Vol1 Analy Personal\Titanium\Ti_cAxis_PTP_1\test\DIC\DIC continual';
+% filename = 'N:\Vol1-Th\Analytik\Personal\Philipp Vol1 Analy Personal\Titanium\Ti_cAxis_PTP_1\test\AMICS\insitu tkd Ti_caxis_1 2025.10.06-11.04.44.989049_000.tdms';
+% drift_time_val = 132;
 
-% % Ti PTP_2
-% ebsd_dir = 'N:\EBSD-Analysis-2\Philipp_EBSD_analysis2\0009_Ti_cAxis_PTP_2\H5OINA';
-% dic_dir  = 'N:\Vol1-Th\Analytik\Personal\Philipp Vol1 Analy Personal\Titanium\Ti_cAxis_PTP_2\insitu\DIC';
-% dic_vid_dir = 'N:\Vol1-Th\Analytik\Personal\Philipp Vol1 Analy Personal\Titanium\Ti_cAxis_PTP_2\insitu\DIC\continual';
-% filename = "data/Ti_PTP/Ti_cAxis_PTP_2/TiPTP2_AMICSRT Log 2026.01.20-15.09.00.559488_000.tdms";
-% drift_time_val = 260;
+% Ti PTP_2
+ebsd_dir = 'N:\EBSD-Analysis-2\Philipp_EBSD_analysis2\0009_Ti_cAxis_PTP_2\H5OINA';
+dic_dir  = 'N:\Vol1-Th\Analytik\Personal\Philipp Vol1 Analy Personal\Titanium\Ti_cAxis_PTP_2\insitu\DIC';
+dic_vid_dir = 'N:\Vol1-Th\Analytik\Personal\Philipp Vol1 Analy Personal\Titanium\Ti_cAxis_PTP_2\insitu\DIC\continual';
+filename = "C:\Users\phkr\OneDrive - empa.ch\MTEX_Data\Philipp\Ti_PTP\Ti_cAxis_PTP_2\TiPTP2_AMICSRT Log 2026.01.20-15.09.00.559488_000.tdms";
+drift_time_val = 260;
 
 % % Nb bicrystal
 % ebsd_dir = 'N:\EBSD-Analysis-2\Philipp_EBSD_analysis2\0008_Nb_bicrystal_PTP1\insitu\h5oina';
@@ -458,4 +458,68 @@ end
 
 if ~isempty(legend_handles)
     legend(legend_handles, legend_labels, 'Location', 'northeast');
+end
+
+% =========================================================================
+% 8. EXPORT TIMELINE DATA TO JSON
+% =========================================================================
+fprintf('\nExporting timeline data to JSON for external inspection...\n');
+timelineData = struct();
+
+% Downsample the continuous TDMS curve data by a factor to keep JSON size reasonable
+% (Usually TDMS has 10,000+ points, we cap it at ~5000 points for the timeline)
+ds_factor = max(1, floor(length(shifted_timestamps) / 5000));
+idx_ds = 1:ds_factor:length(shifted_timestamps);
+
+timelineData.tdms_curve = struct();
+timelineData.tdms_curve.timestamps = cellstr(string(shifted_timestamps(idx_ds), 'yyyy-MM-dd HH:mm:ss.SSS'));
+timelineData.tdms_curve.displacement_um = disp_um(idx_ds);
+timelineData.tdms_curve.load_mN = load_mN(idx_ds);
+
+timelineData.events = struct('type', {}, 'name', {}, 'start_time', {}, 'end_time', {}, 'hv_kV', {});
+idx = 1;
+
+for i = 1:num_ebsd
+    timelineData.events(idx).type = 'EBSD';
+    timelineData.events(idx).name = char(ebsd_names(i));
+    timelineData.events(idx).start_time = char(string(ebsd_starts(i), 'yyyy-MM-dd HH:mm:ss.SSS'));
+    timelineData.events(idx).end_time = char(string(ebsd_ends(i), 'yyyy-MM-dd HH:mm:ss.SSS'));
+    timelineData.events(idx).hv_kV = ebsd_hvs(i);
+    idx = idx + 1;
+end
+
+for i = 1:num_dic
+    timelineData.events(idx).type = 'DIC_Scan';
+    timelineData.events(idx).name = char(dic_names(i));
+    timelineData.events(idx).start_time = char(string(dic_starts(i), 'yyyy-MM-dd HH:mm:ss.SSS'));
+    timelineData.events(idx).end_time = char(string(dic_ends(i), 'yyyy-MM-dd HH:mm:ss.SSS'));
+    timelineData.events(idx).hv_kV = dic_hvs(i);
+    idx = idx + 1;
+end
+
+for i = 1:num_vid
+    timelineData.events(idx).type = 'DIC_Video';
+    timelineData.events(idx).name = char(vid_names(i));
+    timelineData.events(idx).start_time = char(string(vid_starts(i), 'yyyy-MM-dd HH:mm:ss.SSS'));
+    timelineData.events(idx).end_time = char(string(vid_ends(i), 'yyyy-MM-dd HH:mm:ss.SSS'));
+    timelineData.events(idx).hv_kV = vid_hvs(i);
+    idx = idx + 1;
+end
+
+% Save to JSON safely supporting older MATLAB versions
+try
+    json_text = jsonencode(timelineData, 'PrettyPrint', true);
+catch
+    json_text = jsonencode(timelineData);
+end
+
+[tdms_folder, tdms_base, ~] = fileparts(char(filename));
+json_path = fullfile(tdms_folder, [tdms_base, '_timeline.json']);
+fid = fopen(json_path, 'w');
+if fid ~= -1
+    fprintf(fid, '%s', json_text);
+    fclose(fid);
+    fprintf('  -> Successfully saved timeline JSON: %s\n', json_path);
+else
+    warning('Failed to open file for JSON export: %s', json_path);
 end

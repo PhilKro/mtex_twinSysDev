@@ -1,26 +1,54 @@
 %% forwardDeformed_06_SSLIP_subtractedTwinShear.m
 % Applies the SSLIP analysis method to forward deformed DIC data on TKD datasets with multiple grains,
-% globally subtracting the theoretical displacement gradient of a selected twin variant (v) formed in the parent grain.
-% This decouples twinning shear from secondary dislocation glide (slip) plasticity occurring in the presence of twinning.
+% globally subtracting the theoretical displacement gradient of a selected twin variant (v) 
+% formed in the primary parent grain.
+% This decouples twinning shear from secondary dislocation glide (slip) plasticity.
 %
-% Outputs results to: Processed_Output_Deformed_Forward/SSLIP_SubtractedTwinShear_Results
+% Outputs results directly to: Processed_Output_Deformed_Forward/SSLIP_SubtractedTwinShear_Results.
 
 clear; close all; clc;
 
 addpath('c:\Users\phkr\MTEX_workEnv\userScripts\HelperFunctions');
+addpath('c:\Users\phkr\MTEX_workEnv\userScripts\SSLIP\src');
 
 plotx2east;
 plotzIntoPlane;
 plottingConvention.default.east = xvector;
 plottingConvention.default.outOfScreen = -zvector;
 
-%% User Configuration for Twin Subtraction
-% Specify which primary {10-12} tensile twin variants to globally subtract before SSLIP optimization.
-% Set to a single variant ID (e.g., target_variants = [1]) or evaluate a series (e.g., target_variants = 1:6).
-target_variants = [1]; 
+%% ========================================================================
+%  USER CONFIGURATION & PRESETS (Modify as desired)
+% =========================================================================
+cfg = struct();
+
+% --- PRESET A: Subtracted Twin Shear SSLIP ---
+cfg.analysis_name    = 'SubtractedTwinShear_Var6';
+cfg.target_variants  = [6];         % Twin variants to subtract (e.g., [1, 2] or [6])
+cfg.shear_scaling_factor = 1.0;     % Twinning shear multiplier (1.0 = theoretical shear)
+
+cfg.slip_system_mode = 'all';       % 'all', 'a_only', 'ca_only', or 'basal_pyr'
+cfg.threshold_SF     = 0.01;        % Minimum Schmid Factor threshold
+cfg.stress_vector    = yvector;     % Uniaxial stress loading axis
+cfg.restrict2GrainId = 0;           % 0 = all, [1,2,3] grainIds
+cfg.stressSign = 1;                 %-1 compression, 1 extension
+
+cfg.sslip_method     = 1;           % IDMethod (1 = multi-slip optimization)
+cfg.posConstr        = 1;           % Enforce non-negative shear activity
+cfg.threshResidual   = 0.02;        % Residual threshold for correlation rate calculation
+cfg.threshResidualFraction = 0.50;  % Threshold residual as fraction of effective shear
+cfg.minEeff          = 0.01;        % Minimum effective shear strain required for metric evaluation
+cfg.minSize          = 300;         % Minimum grain size in pixels to analyze
+cfg.logscale         = 0; 
+
+% Lightweight JPG export settings
+cfg.jpg_dpi          = 150;
+cfg.jpg_target_px    = 1200;
+cfg.clim_percentile  = 99;
+cfg.plotBoundariesOverDisps = 0;
+% =========================================================================
 
 %% 1. Load Registry & Configure Step Selection
-[registry, defaults] = a00_Dataset_Registry();
+[registry, defaults] = a00_Dataset_Registry_DifferentialDIC();
 
 % Filter for non-excluded deformed steps with valid TKD maps and DIC groups
 defSteps = registry(~[registry.isReference] & ~[registry.exclude] & ...
@@ -28,13 +56,13 @@ defSteps = registry(~[registry.isReference] & ~[registry.exclude] & ...
 
 if isempty(defSteps)
     fprintf('========================================================================\n');
-    fprintf('NOTICE: No valid deformed step entries found in a00_Dataset_Registry().\n');
+    fprintf('NOTICE: No valid deformed step entries found in registry.\n');
     fprintf('========================================================================\n');
     return;
 end
 
 inDir  = fullfile(defaults.dir, defaults.outDir_deformed);
-outDir = fullfile(defaults.dir, defaults.outDir_deformed, 'SSLIP_SubtractedTwinShear_Results');
+outDir = fullfile(defaults.dir, defaults.outDir_deformed, ['SSLIP_SubtractedTwinShear_Results_', cfg.analysis_name]);
 if ~exist(outDir, 'dir'), mkdir(outDir); end
 
 fprintf('========================================================================\n');
@@ -44,13 +72,14 @@ fprintf('=======================================================================
 %% 2. Iterate Over Each Deformed Step
 for stepIdx = 1:numel(defSteps)
     defStep = defSteps(stepIdx);
+    prefix = defStep.stepName;
     fprintf('\n------------------------------------------------------------------------\n');
-    fprintf('Processing Step [%s] (%d/%d) - DIC Group: %s\n', defStep.stepName, stepIdx, numel(defSteps), defStep.dic_group);
+    fprintf('Processing Step [%s] (%d/%d) - DIC Group: %s\n', prefix, stepIdx, numel(defSteps), defStep.dic_group);
     fprintf('------------------------------------------------------------------------\n');
     
-    matPath = fullfile(inDir, [defStep.stepName, '_deformedEBSD_withForwardDIC.mat']);
+    matPath = fullfile(inDir, [prefix, '_deformedEBSD_withForwardDIC.mat']);
     if ~exist(matPath, 'file')
-        warning('Aligned dataset not found at:\n  %s\nRun forwardDeformed_03_IMPORTER first for Step [%s]. Skipping.', matPath, defStep.stepName);
+        warning('Aligned dataset not found at:\n  %s\nRun forwardDeformed_03_IMPORTER first for Step [%s]. Skipping.', matPath, prefix);
         continue;
     end
     
@@ -60,7 +89,6 @@ for stepIdx = 1:numel(defSteps)
     
     %% 3. Retrieve or Reconstruct Grains & Identify Primary Parent Grain
     grainThresh = 5*degree; 
-    minSize = 300; % Threshold in pixels to isolate significant grains
     alpha = 1;
 
     if isfield(dataLoaded, 'grains')
@@ -70,118 +98,118 @@ for stepIdx = 1:numel(defSteps)
         fprintf('  -> Precomputed grains not found. Calculating grains dynamically...\n');
         thresh_ci = defaults.thresh_ci;
         newEBSD(newEBSD.ci < thresh_ci) = 'notIndexed';
-        [grains, newEBSD.grainId, newEBSD.mis2mean] = calcGrains(newEBSD, 'minPixel', minSize, 'angle', grainThresh, 'alpha', alpha);
+        [grains, newEBSD.grainId, newEBSD.mis2mean] = calcGrains(newEBSD, 'minPixel', cfg.minSize, 'angle', grainThresh, 'alpha', alpha);
     end
 
     % Identify primary Parent Grain (matrix grain with largest surface area/pixels)
     [~, parentIdx] = max(grains.numPixel);
     parentGrain = grains(parentIdx);
     fprintf('  -> Primary Parent Matrix Identified: Grain %d (%d px, (%.1f, %.1f) um).\n', ...
-            parentGrain.id, parentGrain.numPixel, parentGrain.centroid(1), parentGrain.centroid(2));
+            parentGrain.id, parentGrain.numPixel, parentGrain.centroid.x, parentGrain.centroid.y);
+
+    % Save reference Grain Map figure for this step
+    figG = figure('Visible', 'off');
+    plot(grains, grains.meanOrientation); hold on;
+    text(grains, grains.id, 'Color', 'white', 'FontWeight', 'bold');
+    title(sprintf('%s: Analyzed Grains (>%d px) | Parent: Grain %d', prefix, cfg.minSize, parentGrain.id), 'Interpreter', 'none');
+    hold off;
+    exportScaledFigure(figG, fullfile(outDir, sprintf('%s_GrainMap.jpg', prefix)), 'target_px', cfg.jpg_target_px, 'dpi', cfg.jpg_dpi, 'nodatestring');
+    close(figG);
 
     %% 4. Calculate Theoretical Twin Displacement Gradient Tensors ({10-12} Twinning)
     tS_1012 = twinSystem.hexagonal_1012(newEBSD.CS);
     tS_sym  = tS_1012.symmetrise; % All 6 primary variants
     
     % Transform theoretical twinning displacement gradients into global specimen reference frame
+    % using the orientation of the primary parent grain.
     H_twin_global = parentGrain.meanOrientation * tS_sym.displacementGradient;
 
-    %% 5. Retrieve or Calculate Global Raw Displacement Gradients (H_raw)
+    %% 5. Locate the Forward DIC Displacement Fields
     all_fields = fields(newEBSD.prop);
-    
-    % Search for precomputed gradient components first
-    hxx_idx = find(contains(all_fields, {'_Hxx', '_dudx'}, 'IgnoreCase', true), 1);
-    hxy_idx = find(contains(all_fields, {'_Hxy', '_dudy'}, 'IgnoreCase', true), 1);
-    hyx_idx = find(contains(all_fields, {'_Hyx', '_dvdx'}, 'IgnoreCase', true), 1);
-    hyy_idx = find(contains(all_fields, {'_Hyy', '_dvdy'}, 'IgnoreCase', true), 1);
-    
     ux_idx = find(contains(all_fields, '_Displacements_x_displacement', 'IgnoreCase', true), 1);
     uy_idx = find(contains(all_fields, '_Displacements_y_displacement', 'IgnoreCase', true), 1);
-
+    
     if isempty(ux_idx) || isempty(uy_idx)
-        warning('Could not find displacement fields in newEBSD.prop for step %s. Skipping.', defStep.stepName);
+        warning('Could not find x and y displacement fields in newEBSD.prop for step %s. Skipping.', prefix);
         continue;
     end
     ux_field = all_fields{ux_idx};
     uy_field = all_fields{uy_idx};
-
+    
+    hxx_idx = find(contains(all_fields, 'du', 'IgnoreCase', true) & contains(all_fields, 'dx', 'IgnoreCase', true) & ~contains(all_fields, 'dy', 'IgnoreCase', true), 1);
+    hxy_idx = find(contains(all_fields, 'du', 'IgnoreCase', true) & contains(all_fields, 'dy', 'IgnoreCase', true) & ~contains(all_fields, 'dx', 'IgnoreCase', true), 1);
+    hyx_idx = find(contains(all_fields, 'dv', 'IgnoreCase', true) & contains(all_fields, 'dx', 'IgnoreCase', true) & ~contains(all_fields, 'dy', 'IgnoreCase', true), 1);
+    hyy_idx = find(contains(all_fields, 'dv', 'IgnoreCase', true) & contains(all_fields, 'dy', 'IgnoreCase', true) & ~contains(all_fields, 'dx', 'IgnoreCase', true), 1);
+    
     if ~isempty(hxx_idx) && ~isempty(hxy_idx) && ~isempty(hyx_idx) && ~isempty(hyy_idx)
-        fprintf('  -> Using pre-computed DIC displacement gradient fields directly from dataset.\n');
         Hxx_raw = double(newEBSD.prop.(all_fields{hxx_idx}));
         Hxy_raw = double(newEBSD.prop.(all_fields{hxy_idx}));
         Hyx_raw = double(newEBSD.prop.(all_fields{hyx_idx}));
         Hyy_raw = double(newEBSD.prop.(all_fields{hyy_idx}));
+        hasGradients = true;
     else
-        fprintf('  -> Computing displacement gradient field via Gaussian smoothed displacements...\n');
-        ebsd_grid = newEBSD.gridify;
-        grid_size = size(ebsd_grid);
-        
-        U_raw = double(ebsd_grid.prop.(ux_field)); U_raw(U_raw == 0) = NaN;
-        V_raw = double(ebsd_grid.prop.(uy_field)); V_raw(V_raw == 0) = NaN;
-        U_grid = reshape(U_raw * ebsd_grid.dPos, grid_size);
-        V_grid = reshape(V_raw * ebsd_grid.dPos, grid_size);
-        
-        filt_opt.filt_std = 4;
-        try
-            sm_data = filterDisplacements(U_grid, V_grid, filt_opt);
-            U_grid = sm_data.U; V_grid = sm_data.V;
-        catch
-            warning('filterDisplacements not found. Using raw displacement grid for gradient calculation.');
+        warning('No raw displacement gradients found in newEBSD.prop. Run importer first.');
+        continue;
+    end
+
+    %% 6. Define Candidate Slip Systems based on Toggled Mode
+    CS = newEBSD.CS;
+    sS_basal_all = slipSystem.basal(CS);
+    sS_prism_all = slipSystem.prismaticA(CS);
+    sS_pyra_all  = slipSystem.pyramidalA(CS);
+    sS_ca_all    = slipSystem.pyramidalCA(CS);
+
+    switch lower(cfg.slip_system_mode)
+        case {'all', 'everything'}
+            sS_raw = [sS_basal_all; sS_prism_all; sS_pyra_all; sS_ca_all];
+            mode_str = 'All Systems (Basal, Prism, Pyr <a>, Pyr <c+a>)';
+        case {'a', 'a_only', 'only_a'}
+            sS_raw = [sS_basal_all; sS_prism_all; sS_pyra_all];
+            mode_str = 'Only <a> Type Systems (Basal, Prism, Pyr <a>)';
+        case {'ca', 'c+a', 'ca_only', 'only_ca'}
+            sS_raw = sS_ca_all;
+            mode_str = 'Only <c+a> Type Systems (Pyr <c+a>)';
+        case {'basal_pyramidal', 'basal_pyr', 'only_basal_pyr'}
+            sS_raw = [sS_basal_all; sS_pyra_all; sS_ca_all];
+            mode_str = 'Basal & Pyramidal Systems (Excluding Prismatic)';
+        otherwise
+            sS_raw = [sS_basal_all; sS_prism_all; sS_pyra_all; sS_ca_all];
+            mode_str = 'Default: All Systems';
+    end
+
+    sS = symmetrise(sS_raw, 'antipodal');
+    fprintf('  -> Slip System Mode [%s]: %d candidate systems initialized.\n', cfg.slip_system_mode, length(sS));
+
+    %% 7. Evaluate Significant Grains
+    valid_grains = grains(grains.numPixel > cfg.minSize);
+    if isempty(valid_grains)
+        warning('No grains larger than %d pixels in step %s. Skipping.', cfg.minSize, prefix);
+        continue;
+    end
+
+    grains_ids = valid_grains.id; 
+    if isfield(cfg, 'restrict2GrainId') && ~isequal(cfg.restrict2GrainId, 0) && ~isempty(cfg.restrict2GrainId) && all(cfg.restrict2GrainId > 0)
+        grains_ids = intersect(grains_ids, cfg.restrict2GrainId);
+        if isempty(grains_ids)
+            warning('None of the restricted grain IDs [%s] were found among significant grains. Skipping.', num2str(cfg.restrict2GrainId));
+            continue;
         end
-        
-        [Hxx_grid, Hxy_grid] = gradient(U_grid, ebsd_grid.dPos, ebsd_grid.dPos);
-        [Hyx_grid, Hyy_grid] = gradient(V_grid, ebsd_grid.dPos, ebsd_grid.dPos);
-        
-        grid_ids  = ebsd_grid.id(:);
-        valid_idx = ~isnan(grid_ids) & grid_ids > 0;
-        [~, loc] = ismember(newEBSD.id, grid_ids(valid_idx));
-        
-        tmp = Hxx_grid(:); Hxx_raw = tmp(valid_idx); Hxx_raw = Hxx_raw(loc);
-        tmp = Hxy_grid(:); Hxy_raw = tmp(valid_idx); Hxy_raw = Hxy_raw(loc);
-        tmp = Hyx_grid(:); Hyx_raw = tmp(valid_idx); Hyx_raw = Hyx_raw(loc);
-        tmp = Hyy_grid(:); Hyy_raw = tmp(valid_idx); Hyy_raw = Hyy_raw(loc);
+        fprintf('  -> Restricting analysis to %d specified grain(s).\n', length(grains_ids));
+    else
+        fprintf('  -> Analyzing all %d significant grains...\n', length(grains_ids));
     end
-
-    %% 6. Define Slip Systems for Titanium (HCP)
-    sS_basal = slipSystem.basal(newEBSD.CS);
-    sS_prism = slipSystem.prismaticA(newEBSD.CS);
-    sS = [sS_basal; sS_prism];
-    sS = symmetrise(sS, 'antipodal');
-
-    valid_grains = grains(grains.numPixel > minSize);
-    grains_ids = valid_grains.id;
-    fprintf('  -> Ready to run subtracted SSLIP across %d significant grain(s).\n', length(grains_ids));
-
-    % --- Plot 1: Displacement Gradient Field BEFORE Subtraction ---
-    all_vals_raw = [Hxx_raw(:); Hxy_raw(:); Hyx_raw(:); Hyy_raw(:)];
-    all_vals_raw = all_vals_raw(~isnan(all_vals_raw));
-    cmin_raw = 0.2 * min(all_vals_raw);
-    cmax_raw = 0.2 * max(all_vals_raw);
     
-    figRaw = figure('Name', 'Displacement Gradient Verification BEFORE Subtraction', 'Visible', 'off', 'Position', [150, 150, 1200, 900]);
-    newMtexFigure('layout', [2, 2]);
-    raw_vals   = {Hxx_raw, Hxy_raw, Hyx_raw, Hyy_raw};
-    raw_titles = {'du/dx (H_{11} Raw)', 'du/dy (H_{12} Raw)', 'dv/dx (H_{21} Raw)', 'dv/dy (H_{22} Raw)'};
-    raw_cb_lbl = {'du/dx', 'du/dy', 'dv/dx', 'dv/dy'};
-    for k = 1:4
-        if k > 1, nextAxis; end
-        plot(newEBSD, raw_vals{k}); hold on;
-        plot(grains.boundary, 'lineW', 1, 'color', 'k');
-        quiver(grains, xvector, 'Color', 'r', 'LineWidth', 1.5, 'DisplayName', 'xvector');
-        quiver(grains, yvector, 'Color', 'g', 'LineWidth', 1.5, 'DisplayName', 'yvector');
-        title(raw_titles{k});
-        colormap(gca, 'parula');
-        mtexColorbar('title', raw_cb_lbl{k});
-        caxis([cmin_raw cmax_raw]);
-        hold off;
+    combinedMatPath = fullfile(outDir, sprintf('%s_%s_CombinedSSLIP.mat', prefix, cfg.slip_system_mode));
+    if exist(combinedMatPath, 'file')
+        fprintf('  -> Loading combined SSLIP results from: %s\n', combinedMatPath);
+        load(combinedMatPath, 'stepResults');
+    else
+        stepResults = struct();
     end
-    sgtitle(sprintf('[%s] Experimental Displacement Gradients BEFORE Subtraction', defStep.stepName), 'Interpreter', 'none');
-    exportScaledFigure(figRaw, fullfile(outDir, sprintf('%s_BeforeSubtraction_Gradients.png', defStep.stepName)), 'nodatestring');
-    close(figRaw);
 
-    %% 7. Loop over Selected Twin Variants to Subtract and Run SSLIP
-    for var_idx = 1:length(target_variants)
-        v = target_variants(var_idx);
+    %% 8. Loop over Selected Twin Variants to Subtract and Run SSLIP
+    for var_idx = 1:length(cfg.target_variants)
+        v = cfg.target_variants(var_idx);
         if v > numel(tS_sym)
             warning('Variant index %d out of bounds (max %d). Skipping.', v, numel(tS_sym));
             continue;
@@ -193,11 +221,13 @@ for stepIdx = 1:numel(defSteps)
         
         % Extract 2D theoretical displacement gradient tensor for variant v
         H_tv = H_twin_global(v).M(1:2, 1:2);
-        fprintf('     Theoretical Twin Gradient Tensor H_id(v=%d):\n', v);
-        fprintf('       [ %8.4f,  %8.4f ]\n       [ %8.4f,  %8.4f ]\n', H_tv(1,1), H_tv(1,2), H_tv(2,1), H_tv(2,2));
+        H_tv_scaled = cfg.shear_scaling_factor * H_tv;
+        
+        fprintf('     Scaled Theoretical Twin Gradient Tensor H_id(v=%d, Scale=%.2f):\n', v, cfg.shear_scaling_factor);
+        fprintf('       [ %8.4f,  %8.4f ]\n       [ %8.4f,  %8.4f ]\n', H_tv_scaled(1,1), H_tv_scaled(1,2), H_tv_scaled(2,1), H_tv_scaled(2,2));
         
         % Rigorous Multiplicative Decoupling: F_slip = F_total * (F_twin)^-1
-        F_twin_2d = eye(2) + H_tv;
+        F_twin_2d = eye(2) + H_tv_scaled;
         F_twin_inv = inv(F_twin_2d);
         
         a11 = F_twin_inv(1,1); a12 = F_twin_inv(1,2);
@@ -218,103 +248,71 @@ for stepIdx = 1:numel(defSteps)
         newEBSD.prop.Hxy_sub = F_slip_12;
         newEBSD.prop.Hyx_sub = F_slip_21;
         newEBSD.prop.Hyy_sub = F_slip_22 - 1;
-        
-        % Calculate twinned parent orientation (parent orientation transformed by twin variant misorientation)
-        if isprop(tS_sym(v), 'misorientation') || ismethod(tS_sym(v), 'misorientation') || isfield(tS_sym(v), 'misorientation')
-            twinMis = tS_sym(v).misorientation;
-        else
-            twinMis = tS_sym(v);
-        end
-        parentOri_twinned = parentGrain.meanOrientation * twinMis;
-        
-        % --- Save Visual Check Plot of Subtracted Fields ---
-        Hxx_s = newEBSD.prop.Hxx_sub; Hxy_s = newEBSD.prop.Hxy_sub;
-        Hyx_s = newEBSD.prop.Hyx_sub; Hyy_s = newEBSD.prop.Hyy_sub;
-        all_vals_sub = [Hxx_s(:); Hxy_s(:); Hyx_s(:); Hyy_s(:)];
-        all_vals_sub = all_vals_sub(~isnan(all_vals_sub));
-        cmin_sub = 0.2 * min(all_vals_sub);
-        cmax_sub = 0.2 * max(all_vals_sub);
-        
-        figSub = figure('Name', 'Decoupled Secondary Slip Gradients AFTER Subtraction', 'Visible', 'off', 'Position', [150, 150, 1200, 900]);
-        newMtexFigure('layout', [2, 2]);
-        sub_fields = {Hxx_s, Hxy_s, Hyx_s, Hyy_s};
-        sub_titles = {'H_{11} Decoupled Slip', 'H_{12} Decoupled Slip', 'H_{21} Decoupled Slip', 'H_{22} Decoupled Slip'};
-        sub_cb_lbl = {'H_{11}', 'H_{12}', 'H_{21}', 'H_{22}'};
-        for k = 1:4
-            if k > 1, nextAxis; end
-            plot(newEBSD, sub_fields{k}); hold on;
-            plot(grains.boundary, 'lineW', 1, 'color', 'k');
-            quiver(grains, xvector, 'Color', 'r', 'LineWidth', 1.5, 'DisplayName', 'xvector');
-            quiver(grains, yvector, 'Color', 'g', 'LineWidth', 1.5, 'DisplayName', 'yvector');
-            title(sprintf('%s (Var %d)', sub_titles{k}, v));
-            colormap(gca, 'parula');
-            mtexColorbar('title', sub_cb_lbl{k});
-            caxis([cmin_sub cmax_sub]);
-            hold off;
-        end
-        sgtitle(sprintf('[%s] Multiplicatively Decoupled Secondary Slip Gradients (Variant %d)', defStep.stepName, v), 'Interpreter', 'none');
-        exportScaledFigure(figSub, fullfile(outDir, sprintf('%s_SubtractedGradients_Var%d.png', defStep.stepName, v)), 'nodatestring');
-        close(figSub);
 
-        % --- Run SSLIP across individual grains using Decoupled Gradients and Twinned Parent Orientation ---
+        summary_results = struct('grainId', {}, 'numPixel', {}, 'comb_index', {}, 'corr_rate', {}, 'total_gamma', {}, 'top_sys', {}, 'baseName', {});
+
         for g_i = 1:length(grains_ids)
-            clear IDoptions
-            close all
+            clear IDoptions;
+            close all;
             grainId = grains_ids(g_i);
 
-            fprintf('\n     [Variant %d | Grain %d (%d px)] Initializing slip system geometry in twinned lattice...\n', v, grainId, grains(grainId).numPixel);
+            fprintf('\n   [Variant %d | Grain %d (%d px)] Initializing slip geometry...\n', v, grainId, grains(grainId).numPixel);
 
-            % Project slip systems using the twinned parent orientation instead of original parent orientation
-            sSLocal = parentOri_twinned * sS;
+            % IMPORTANT FIX: Project global slip systems into the experimental local grain lattice orientation.
+            % We DO NOT overwrite the experimental orientation with the theoretical twinned parent orientation,
+            % as requested by the user, ensuring evaluation in true grain coordinates.
+            sSLocal = grains(grainId).meanOrientation * sS;
 
-            threshold_SF = 0.1;
-            stressState = stressTensor.uniaxial(yvector);
+            stressState = cfg.stressSign * stressTensor.uniaxial(cfg.stress_vector);
             
-            % Reconfigure slip systems to ensure positive Schmid factor under assumed loading
-            sf_signs = sign(sSLocal.SchmidFactor(stressState));
+            % Reconfigure slip systems to ensure positive Schmid factor
+            sf_vals = sSLocal.SchmidFactor(stressState);
+            sf_signs = sign(sf_vals);
             sf_signs(sf_signs == 0) = 1;
-            sSLocal.n = sf_signs .* sSLocal.n;
+            sSLocal.b = sf_signs .* sSLocal.b;
             
-            SF_crit = abs(sSLocal.SchmidFactor(stressState)) > threshold_SF;
-
+            SF_crit = abs(sSLocal.SchmidFactor(stressState)) >= cfg.threshold_SF;
             sSLocal_filt = sSLocal(SF_crit);
             sS_filt = sS(SF_crit);
 
             if isempty(sS_filt)
-                warning('     No slip systems with SF > %.2f for Grain %d. Skipping grain.', threshold_SF, grainId);
+                warning('   No slip systems with SF >= %.2f for Step [%s] Grain %d. Skipping grain.', cfg.threshold_SF, prefix, grainId);
                 continue;
             end
 
-            % Slice EBSD to grain and gridify (automatically slices Hxx_sub, etc.)
+            % Extract EBSD data slice specific to this grain and gridify
             ebsd_grain = newEBSD(grains(grainId));
             ebsd_grain = ebsd_grain.gridify;
-            ebsd_grain.orientations = repmat(parentOri_twinned, size(ebsd_grain.orientations));
 
+            % Convert displacement field to physical units via dPos
             U = ebsd_grain.prop.(ux_field) * newEBSD.dPos; 
             V = ebsd_grain.prop.(uy_field) * newEBSD.dPos;
 
-            plotBaseName = sprintf('%s_SSLIP_Grain%d_Var%d_%s', defStep.stepName, grainId, v, defStep.dic_group);
+            plotBaseName = sprintf('%s_Grain%d_Var%d_%s', prefix, grainId, v, cfg.slip_system_mode);
 
-            IDoptions.IDMethod = 1;
-            IDoptions.filterSize = 4;
+            IDoptions.IDMethod    = cfg.sslip_method;
+            IDoptions.filterSize  = 4;
             IDoptions.coarsegrain = 4;
-            IDoptions.threshResidual = 0.02;
-            IDoptions.minEeff = 0.01;
-            IDoptions.posConstr = 1;
-            IDoptions.plotSSLIP = 1;
-            IDoptions.layout = [];
-            IDoptions.plotTraces = 1;
-            IDoptions.stress = stressState;
-            IDoptions.casename = plotBaseName;
+            IDoptions.threshResidual = cfg.threshResidual;
+            if isfield(cfg, 'threshResidualFraction')
+                IDoptions.threshResidualFraction = cfg.threshResidualFraction;
+            end
+            IDoptions.minEeff     = cfg.minEeff;
+            IDoptions.posConstr   = cfg.posConstr;
+            IDoptions.plotSSLIP   = 0;
+            IDoptions.layout      = [];
+            IDoptions.plotTraces  = 1;
+            IDoptions.stress      = stressState;
+            IDoptions.casename    = plotBaseName;
             IDoptions.plotDefGrad = 1;
-            IDoptions.saveFig = 1;
-            IDoptions.plotname = fullfile(outDir, plotBaseName);
-            IDoptions.sizeAdjust = 0.5;
+            IDoptions.saveFig     = 0;
+            IDoptions.plotname    = fullfile(outDir, plotBaseName);
+            IDoptions.sizeAdjust  = 0.5;
             IDoptions.plotResidual = 1;
-            IDoptions.logscale = 1;
-            IDoptions.logmin = 0.01;
+            IDoptions.logscale    = cfg.logscale;
+            if cfg.logscale, IDoptions.logmin = 0.01; end
             try, IDoptions.cmap = viridis(512); catch, IDoptions.cmap = parula(256); end
-            IDoptions.comment = sprintf('Step_%s_Grain_%d_SubVar_%d', defStep.stepName, grainId, v);
+            IDoptions.comment = sprintf('Grain %d [%s Mode] (Subtracted Var %d)', grainId, cfg.slip_system_mode, v);
             IDoptions.NoSs = 1:length(sS_filt);
 
             % Feed subtracted gradient fields into SSLIP optimizer!
@@ -323,29 +321,304 @@ for stepIdx = 1:numel(defSteps)
             IDoptions.Hyx = ebsd_grain.prop.Hyx_sub;
             IDoptions.Hyy = ebsd_grain.prop.Hyy_sub;
 
-            fprintf('     Running optimizer on %d candidate systems with subtracted shear...\n', length(sS_filt));
+            variantGrainKey = sprintf('var_%d_grain_%d', v, grainId);
 
             try
-                [ebsdID, optOut] = SSLIP(ebsd_grain, U, V, sSLocal_filt, IDoptions);
+                if isfield(stepResults, variantGrainKey)
+                    fprintf('   Loading existing SSLIP optimization results for Var %d Grain %d from combined mat...\n', v, grainId);
+                    ebsdID       = stepResults.(variantGrainKey).ebsdID;
+                    sSLocal_filt = stepResults.(variantGrainKey).sSLocal_filt;
+                    optOut       = stepResults.(variantGrainKey).optOut;
+                    m_res        = stepResults.(variantGrainKey).m_res;
+                    corr_rate    = stepResults.(variantGrainKey).corr_rate;
+                else
+                    fprintf('   Running SSLIP optimization (%d candidate systems) with subtracted shear...\n', length(sS_filt));
+                    [ebsdID, optOut] = SSLIP(ebsd_grain, U, V, sSLocal_filt, IDoptions);
+    
+                    % Save deformation gradient summary figure produced by SSLIP
+                    if IDoptions.plotDefGrad
+                        defGrad_fig = gcf;
+                        exportScaledFigure(defGrad_fig, fullfile(outDir, [plotBaseName, '_DefGrad.jpg']), 'target_px', cfg.jpg_target_px, 'dpi', cfg.jpg_dpi, 'nodatestring');
+                        close(defGrad_fig);
+                    end
+    
+                    % Calculate robust quality metrics
+                    Eeff_eval = ebsdID.prop.Eeff(:);
+                    eval_mask = (Eeff_eval >= cfg.minEeff) & ~isnan(Eeff_eval);
+                    
+                    res_map  = ebsdID.prop.residualEeff(:);
+                    res_eval = res_map(eval_mask);
+                    total_attempted = sum(eval_mask);
+                    
+                    corr_mask = ~isnan(res_eval) & (res_eval < cfg.threshResidual);
+                    num_corr  = sum(corr_mask);
+                    corr_rate = (num_corr / max(1, total_attempted)) * 100;
+                    corr_frac = num_corr / max(1, total_attempted);
+                    
+                    if num_corr > 0
+                        r_corr = mean(res_eval(corr_mask));
+                    else
+                        r_corr = cfg.threshResidual;
+                    end
+                    m_res = r_corr / max(1e-3, corr_frac);
+    
+                    % Save into the combined struct immediately after solving
+                    stepResults.(variantGrainKey).ebsdID = ebsdID;
+                    stepResults.(variantGrainKey).sSLocal_filt = sSLocal_filt;
+                    stepResults.(variantGrainKey).optOut = optOut;
+                    stepResults.(variantGrainKey).m_res = m_res;
+                    stepResults.(variantGrainKey).corr_rate = corr_rate;
+                    save(combinedMatPath, 'stepResults', 'cfg', '-v7.3');
+                end
+                
+                mean_acts = mean(ebsdID.prop.slipIDcor, 2, 'omitnan');
+                [sort_acts, sort_idx] = sort(mean_acts, 'descend');
+                
+                top_str = '';
+                for t_i = 1:min(3, length(sort_idx))
+                    sys_idx = sort_idx(t_i);
+                    sys_obj = sS_filt(sys_idx);
+                    if sys_obj.b.norm > 4.0, fam_str = 'Pyr <c+a>';
+                    elseif abs(sys_obj.n.z) > 0.95, fam_str = 'Basal <a>';
+                    elseif abs(sys_obj.n.z) < 0.05, fam_str = 'Prism <a>';
+                    else, fam_str = 'Pyr <a>'; end
+                    top_str = [top_str, sprintf('%s (%s) [SF=%.2f, γ=%.4f]; ', fam_str, sys_obj.b.char, abs(sSLocal_filt(sys_idx).SchmidFactor(stressState)), sort_acts(t_i))];
+                end
+                
+                % Export CSV Table of Active Systems
+                SF_col   = abs(sSLocal_filt.SchmidFactor(IDoptions.stress));
+                SF_col   = round(SF_col(:)*1000)/1000;
+                acts_col = mean_acts(:);
+                id_col   = (1:length(acts_col))';
+                b_col    = arrayfun(@(x) x.b.char, sS_filt(:), 'UniformOutput', false);
+                n_col    = arrayfun(@(x) x.n.char, sS_filt(:), 'UniformOutput', false);
+                
+                num_acts = length(acts_col);
+                num_sys  = length(sS_filt);
+                if num_acts > num_sys
+                    for i_ex = num_sys+1:num_acts
+                        b_col{i_ex, 1} = 'Rotation';
+                        n_col{i_ex, 1} = 'N/A';
+                        SF_col(i_ex, 1) = NaN;
+                    end
+                end
+                
+                T_sys = table(id_col, b_col, n_col, SF_col, acts_col, ...
+                              'VariableNames', {'SlipSystem_ID', 'Burgers_Vector_b', 'Plane_Normal_n', 'Schmid_Factor', 'Mean_Shear_Activity'});
+                writetable(T_sys, fullfile(outDir, [plotBaseName, '_SlipSystems.csv']));
+                
+                % --- OLD PLOTTING SECTION (Commented out) ---
+                % close all;
+                % optOut.saveFig = 0;
+                % plotSSLIP(ebsdID.prop.slipIDcor, ebsdID.prop.residualEeff, ebsdID, sSLocal_filt, optOut);
+                % 
+                % figs = findall(0, 'Type', 'figure');
+                % [~, s_idx_f] = sort([figs.Number]);
+                % figs = figs(s_idx_f);
+                % 
+                % if ~isempty(figs)
+                %     exportScaledFigure(figs(1), [optOut.plotname, '_SlipActivities.jpg'], 'target_px', cfg.jpg_target_px, 'dpi', cfg.jpg_dpi, 'nodatestring');
+                % end
+                % if length(figs) >= 2
+                %     exportScaledFigure(figs(2), [optOut.plotname, '_Residual.jpg'], 'target_px', cfg.jpg_target_px, 'dpi', cfg.jpg_dpi, 'nodatestring');
+                % end
+                % close all;
 
-                % Save calculation MAT object
-                resMatPath = fullfile(outDir, [plotBaseName, '_SSLIP_results.mat']);
-                save(resMatPath, 'ebsdID', 'sSLocal_filt', 'optOut', 'grainId', 'v', 'H_tv');
-                fprintf('     -> Saved subtracted optimization results to: %s\n', resMatPath);
+                % --- NEW CUSTOM PLOTTING SECTION ---
+                close all;
+                n_top = min(3, length(sort_idx)); % main n fields
+                
+                % Calculate Leftover activity
+                leftover_activity = zeros(size(ebsdID.prop.slipIDcor, 2), 1)';
+                for i_lo = n_top+1 : length(sort_idx)
+                    leftover_activity = leftover_activity + ebsdID.prop.slipIDcor(sort_idx(i_lo), :);
+                end
+                
+                % Determine common color limits
+                all_fields_to_plot = [ebsdID.prop.slipIDcor(sort_idx(1:n_top), :); leftover_activity];
+                validData = all_fields_to_plot(~isinf(all_fields_to_plot) & ~isnan(all_fields_to_plot));
+                if isempty(validData)
+                    caxisMinMax = [0 0.1];
+                else
+                    caxisMinMax = [prctile(validData, 100 - cfg.clim_percentile), prctile(validData, cfg.clim_percentile)];
+                    if caxisMinMax(1) < 0 && cfg.posConstr, caxisMinMax(1) = 0; end
+                    if caxisMinMax(2) <= caxisMinMax(1), caxisMinMax(2) = caxisMinMax(1) + 0.05; end
+                end
+                
+                fig_custom = figure;
+                num_plots = n_top + 1;
+                if num_plots <= 2
+                    layout_grid = [1, 2];
+                elseif num_plots <= 4
+                    layout_grid = [2, 2];
+                else
+                    layout_grid = [2, ceil(num_plots/2)];
+                end
+                mtexFig = newMtexFigure('layout', layout_grid);
+                
+                for t_i = 1:n_top
+                    nextAxis;
+                    sys_idx = sort_idx(t_i);
+                    sys_obj = sS_filt(sys_idx);
+                    sf_val = abs(sSLocal_filt(sys_idx).SchmidFactor(stressState));
+                    
+                    % Plot context
+                    plot(grains, 'facecolor', [0.8 0.8 0.8]); hold on;
+                    plot(grains.boundary, 'linecolor', 'k', 'linewidth', 1);
+                    
+                    % Plot Grain SSLIP field
+                    plot(ebsdID, ebsdID.prop.slipIDcor(sys_idx, :), 'micronbar', 'off');
+                    
+                    % Quiver trace and slip direction (matching SSLIP internal logic)
+                    sys_local = sSLocal_filt(sys_idx);
+                    sys_local.b.z = sys_local.b.z .* sign(sys_local.b.z) * sign(plottingConvention.default.outOfScreen.z);
+                    ebsdTrace = ebsdID(round(size(ebsdID,1)/2), round(size(ebsdID,2)/2));
+                    quiver_scale = 0.2 * (max(ebsdID.x,[],'all') - min(ebsdID.x,[],'all'));
+                    hold on; quiver(ebsdTrace, quiver_scale * sys_local.trace, 'color', 'r', 'linewidth', 1.5);
+                    hold on; quiver(ebsdTrace, quiver_scale * sys_local.b.normalize, 'color', 'r', 'linewidth', 1.5);
+                    hold off;
+                    
+                    % Title
+                    if sys_obj.b.norm > 4.0, fam_str = 'Pyr <c+a>';
+                    elseif abs(sys_obj.n.z) > 0.95, fam_str = 'Basal <a>';
+                    elseif abs(sys_obj.n.z) < 0.05, fam_str = 'Prism <a>';
+                    else, fam_str = 'Pyr <a>'; end
+                    
+                    title(sprintf('Top %d: %s (%s)\nSF=%.2f, \\gamma=%.4f', t_i, fam_str, sys_obj.b.char, sf_val, sort_acts(t_i)));
+                    caxis(caxisMinMax);
+                    mtexColorbar('title', '\gamma');
+                    try, mtexColorMap(optOut.cmap); catch, mtexColorMap(parula); end
+                end
+                
+                % Leftover activity
+                nextAxis;
+                % Plot context
+                plot(grains, 'facecolor', [0.8 0.8 0.8]); hold on;
+                plot(grains.boundary, 'linecolor', 'k', 'linewidth', 1);
+                
+                hold on
+                plot(ebsdID, leftover_activity, 'micronbar', 'off');
+                hold off;
+                title(sprintf('Leftover Activity\nSum of %d systems', length(sort_idx) - n_top));
+                caxis(caxisMinMax);
+                mtexColorbar('title', '\gamma');
+                try, mtexColorMap(optOut.cmap); catch, mtexColorMap(parula); end
+                
+                % Save custom figure
+                exportScaledFigure(gcf, [optOut.plotname, '_SlipActivities.jpg'], 'target_px', cfg.jpg_target_px, 'dpi', cfg.jpg_dpi, 'nodatestring');
+                
+                % Plot Residual Map with context
+                fig_res = figure;
+                plot(grains, 'facecolor', [0.8 0.8 0.8]); hold on;
+                plot(grains.boundary, 'linecolor', 'k', 'linewidth', 1);
+                
+                meanResidual = mean(ebsdID.prop.residualEeff(:), 'omitnan');
+                stdResidual = std(ebsdID.prop.residualEeff(:), 'omitnan');
+                hold on
+                plot(ebsdID, ebsdID.prop.residualEeff, 'micronbar', 'off');
+                hold off;
+                title(sprintf('Residual E_{eff}, mean=%.4f', meanResidual));
+                if stdResidual <= 0 || isnan(stdResidual), stdResidual = 0.05; end
+                caxis([0 2*stdResidual]);
+                mtexColorbar;
+                try, mtexColorMap(optOut.cmap); catch, mtexColorMap(parula); end
+                
+                exportScaledFigure(gcf, [optOut.plotname, '_Residual.jpg'], 'target_px', cfg.jpg_target_px, 'dpi', cfg.jpg_dpi, 'nodatestring');
+                close all;
 
-                % Save CSV table
-                SF = abs(SchmidFactor(sSLocal_filt, IDoptions.stress));
-                SF = round(SF*1000)/1000;
+                summary_results(end+1).grainId   = grainId; %#ok<AGROW>
+                summary_results(end).numPixel    = grains(grainId).numPixel;
+                summary_results(end).comb_index  = m_res;
+                summary_results(end).corr_rate   = corr_rate;
+                summary_results(end).total_gamma = sum(mean_acts);
+                summary_results(end).top_sys     = top_str;
+                summary_results(end).baseName    = plotBaseName;
 
-                T = table((1:length(sS_filt))', arrayfun(@(x) x.b.char, sS_filt, 'UniformOutput', false), ...
-                          arrayfun(@(x) x.n.char, sS_filt, 'UniformOutput', false), SF', ...
-                          'VariableNames', {'SlipSystem_ID', 'Burgers_Vector_b', 'Plane_Normal_n', 'Schmid_Factor'});
-
-                csvPath = fullfile(outDir, [plotBaseName, '_SlipSystems.csv']);
-                writetable(T, csvPath);
+                fprintf('   -> Complete! Combined Error Index: %.6f | Correlation Rate: %.1f%%\n', m_res, corr_rate);
             catch ME
-                warning('     SSLIP calculation failed for Grain %d (Variant %d) in step %s:\n        %s', grainId, v, defStep.stepName, ME.message);
+                fprintf(2, '   [ERROR] SSLIP processing failed for Grain %d in step %s:\n%s\n', grainId, prefix, getReport(ME));
             end
+        end
+        
+        if ~isempty(summary_results) && isfield(summary_results, 'grainId') && isempty(summary_results(1).grainId)
+            summary_results(1) = [];
+        end
+
+        if ~isempty(summary_results)
+            % 1. Print Leaderboard
+            fprintf('\n     =================================================================================================================================\n');
+            fprintf('     STEP [%s | Var %d] SSLIP SUMMARY LEADERBOARD (Ranked by Combined Error Index)\n', prefix, v);
+            fprintf('     =================================================================================================================================\n');
+            fprintf('     Rank | Grain ID | Pixels | Combined Error Index | Correlation %% | Total Shear γ | Top Active Slip Systems \n');
+            fprintf('     ---------------------------------------------------------------------------------------------------------------------------------\n');
+            all_err = [summary_results.comb_index];
+            [~, sort_r] = sort(all_err, 'ascend');
+            ranked_summary = summary_results(sort_r);
+            
+            for r_i = 1:length(ranked_summary)
+                pr = ranked_summary(r_i);
+                fprintf('     #%02d  | Grain %02d | %6d |       %.6f       |    %5.1f%%     |    %.4f     | %s \n', ...
+                        r_i, pr.grainId, pr.numPixel, pr.comb_index, pr.corr_rate, pr.total_gamma, pr.top_sys);
+            end
+            fprintf('     =================================================================================================================================\n\n');
+            
+            % 2. Save Summary Table CSV
+            T_sum = table((1:length(ranked_summary))', [ranked_summary.grainId]', [ranked_summary.numPixel]', ...
+                          [ranked_summary.comb_index]', [ranked_summary.corr_rate]', [ranked_summary.total_gamma]', {ranked_summary.top_sys}', ...
+                          'VariableNames', {'Rank', 'Grain_ID', 'Num_Pixels', 'Combined_Error_Index', 'Correlation_Rate_Pct', 'Total_Mean_Shear', 'Dominant_Slip_Systems'});
+            writetable(T_sum, fullfile(outDir, sprintf('%s_Var%d_Summary_Leaderboard.csv', prefix, v)));
+            
+            % 3. Generate Interactive Markdown Report
+            md_path = fullfile(outDir, sprintf('%s_Var%d_SSLIP_Report.md', prefix, v));
+            fprintf('     -> Writing Markdown Report with embedded JPG maps to:\n        %s\n', md_path);
+            
+            fid = fopen(md_path, 'w');
+            fprintf(fid, '# Subtracted Twin Shear SSLIP Report\n\n');
+            fprintf(fid, '- **DIC Step:** `%s`\n', prefix);
+            fprintf(fid, '- **Subtracted Twin Variant:** `%d` (Shear Scaling Factor: `%.2f`)\n', v, cfg.shear_scaling_factor);
+            fprintf(fid, '- **Primary Parent Grain:** `%d`\n', parentGrain.id);
+            fprintf(fid, '- **Slip System Mode:** `%s` (%s)\n', cfg.slip_system_mode, mode_str);
+            fprintf(fid, '- **Schmid Factor Threshold:** `%.2f`\n', cfg.threshold_SF);
+            fprintf(fid, '- **Residual Threshold:** `%.3f`\n\n', cfg.threshResidual);
+            
+            fprintf(fid, '## Analyzed Grain Map\n');
+            fprintf(fid, '![Analyzed Grains](%s_GrainMap.jpg)\n\n---\n\n', prefix);
+            
+            fprintf(fid, '## Grain Analysis Leaderboard\n');
+            fprintf(fid, 'Ranked by lowest **Combined Error Index** ($r_{\\text{comb}} = \\frac{r_{\\text{corr}}}{\\eta_{\\text{corr}}}$).\n\n');
+            fprintf(fid, '| Rank | Grain ID | Pixels | Combined Error Index | Correlation %% | Total $\\gamma$ | Dominant Active Systems |\n');
+            fprintf(fid, '| :---: | :---: | :---: | :---: | :---: | :---: | :--- |\n');
+            for r_i = 1:length(ranked_summary)
+                pr = ranked_summary(r_i);
+                fprintf(fid, '| **#%02d** | Grain %d | `%d` | `%.6f` | `%5.1f%%` | `%.4f` | %s |\n', ...
+                        r_i, pr.grainId, pr.numPixel, pr.comb_index, pr.corr_rate, pr.total_gamma, pr.top_sys);
+            end
+            fprintf(fid, '\n---\n\n');
+            
+            fprintf(fid, '## Detailed Slip Activity & Residual Maps per Grain\n');
+            for r_i = 1:length(ranked_summary)
+                pr = ranked_summary(r_i);
+                b_name = pr.baseName;
+                
+                fprintf(fid, '### Rank #%02d: Grain %d\n', r_i, pr.grainId);
+                fprintf(fid, '- **Combined Error Index:** `%.6f`\n', pr.comb_index);
+                fprintf(fid, '- **Correlation Rate:** `%.1f%%`\n', pr.corr_rate);
+                fprintf(fid, '- **Total Mean Shear Activity:** `%.4f`\n', pr.total_gamma);
+                fprintf(fid, '- **Dominant Systems:** %s\n\n', pr.top_sys);
+                
+                if exist(fullfile(outDir, [b_name, '_DefGrad.jpg']), 'file')
+                    fprintf(fid, '#### SSLIP Deformation & Strain Fields ($U_x$, $E_{\\text{eff}}$, $H_{ij}$)\n');
+                    fprintf(fid, '![Deformation Fields %s](%s_DefGrad.jpg)\n\n', b_name, b_name);
+                end
+                
+                fprintf(fid, '#### Slip System Activity Maps\n');
+                fprintf(fid, '![Activity Maps %s](%s_SlipActivities.jpg)\n\n', b_name, b_name);
+                
+                fprintf(fid, '#### Residual Error Map\n');
+                fprintf(fid, '![Residual Map %s](%s_Residual.jpg)\n\n', b_name, b_name);
+                fprintf(fid, '---\n\n');
+            end
+            fclose(fid);
         end
     end
 end

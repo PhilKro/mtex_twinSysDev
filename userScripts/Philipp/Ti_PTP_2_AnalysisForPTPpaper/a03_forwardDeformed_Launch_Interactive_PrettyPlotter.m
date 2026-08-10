@@ -40,7 +40,8 @@ end
 
 %% 1. Resolve Input Output Directories & Scan Deformed MAT Archives
 try
-    [~, defaults] = a00_Dataset_Registry();
+    % [~, defaults] = a00_Dataset_Registry();
+    [~, defaults] = a00_Dataset_Registry_DifferentialDIC();
     baseDir = defaults.dir;
     inputDir = fullfile(baseDir, defaults.outDir_deformed);
 catch
@@ -143,7 +144,7 @@ for idx_step = 1:length(sel_indices)
         fprintf('  -> Calculating grain boundary topology on-the-fly (>300 px, 5°)...\n');
         [grains, ~] = calcGrains(ebsd_grid, 'minPixel', 300, 'angle', 5*degree);
     end
-    
+   
     % Calculate Effective Shear Strain (geff) prior to studio launch
 
     props_list = fieldnames(ebsd_grid.prop);
@@ -198,6 +199,8 @@ for idx_step = 1:length(sel_indices)
         opts.defaultPropOverlay = available_props{idx_p};
     end
     
+    % change scan unit to nm
+    ebsd_grid.scanUnit = 'nm';
     %% 4. Launch Interactive Visualization Studio
     fprintf('------------------------------------------------------------------------\n');
     fprintf('LAUNCHING INTERACTIVE STUDIO [%d/%d]: %s\n', idx_step, length(sel_indices), stepName);

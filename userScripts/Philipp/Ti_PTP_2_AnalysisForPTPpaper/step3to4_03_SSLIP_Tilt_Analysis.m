@@ -309,10 +309,20 @@ for i_i = 1:length(prefix_list)
                 SF_col   = round(SF_col(:)*1000)/1000;
                 acts_col = mean_acts(:);
                 id_col   = (1:length(acts_col))';
-                b_col    = arrayfun(@(x) x.b.char, sS_filt(:), 'UniformOutput', false);
-                n_col    = arrayfun(@(x) x.n.char, sS_filt(:), 'UniformOutput', false);
-                
-                T_sys = table(id_col, b_col, n_col, SF_col, acts_col, ...
+            b_col    = arrayfun(@(x) x.b.char, sS_filt(:), 'UniformOutput', false);
+            n_col    = arrayfun(@(x) x.n.char, sS_filt(:), 'UniformOutput', false);
+            
+            num_acts = length(acts_col);
+            num_sys  = length(sS_filt);
+            if num_acts > num_sys
+                for i_ex = num_sys+1:num_acts
+                    b_col{i_ex, 1} = 'Rotation';
+                    n_col{i_ex, 1} = 'N/A';
+                    SF_col(i_ex, 1) = NaN;
+                end
+            end
+            
+            T_sys = table(id_col, b_col, n_col, SF_col, acts_col, ...
                               'VariableNames', {'SlipSystem_ID', 'Burgers_Vector_b', 'Plane_Normal_n', 'Schmid_Factor', 'Mean_Shear_Activity'});
                 writetable(T_sys, fullfile(outDir, [case_name, '_SlipSystems.csv']));
                 

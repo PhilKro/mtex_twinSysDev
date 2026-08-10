@@ -15,7 +15,8 @@ plottingConvention.default.east = xvector;
 plottingConvention.default.outOfScreen = -zvector;
 
 %% Load Master Configuration & Dataset Registry
-[registry, defaults] = a00_Dataset_Registry();
+% [registry, defaults] = a00_Dataset_Registry();
+[registry, defaults] = a00_Dataset_Registry_DifferentialDIC();
 
 % Filter for deformed state entries that have a valid associated TKD dataset and are not excluded
 defSteps = registry(~[registry.isReference] & ~[registry.exclude] & ~cellfun(@isempty, {registry.tkd_fname}));
@@ -128,7 +129,7 @@ fprintf('=======================================================================
 %% ========================================================================
 %  PHASE 2: UNATTENDED HEAVY COMPUTATION & EULERIAN FORWARD WARPING
 % =========================================================================
-for stepIdx = 2%1:numel(defSteps)
+for stepIdx = 1:numel(defSteps)
     defStep = defSteps(stepIdx);
     fprintf('\n------------------------------------------------------------------------\n');
     fprintf('[PHASE 2] Executing Forward Warping for Step: %s (%d/%d)\n', defStep.stepName, stepIdx, numel(defSteps));
@@ -229,203 +230,162 @@ for stepIdx = 2%1:numel(defSteps)
     newEBSD = warpIncludeDataInMtex(newEBSD, rawData.SE_raw, 'SE_raw');
     newEBSD = newEBSD.gridify;
 
-    %% DIC Data Loading & Extraction
+    %% DIC Data Loading & Extraction (Unstructured Eulerian Forward Interpolation)
     fprintf('Reading HDF5 DIC dataset group [%s]...\n', defStep.dic_group);
     dicFilePath = input.DIC_filepath;
     try, grpInfo = h5info(dicFilePath, ['/' defStep.dic_group]); catch, continue; end
-
-    targetM = rawData.SE_raw.origM;
-    targetN = rawData.SE_raw.origN;
-    targetSize = [targetM, targetN];
+    
     allPaths = collectH5Paths(grpInfo);
     
     xcoordPath = findDatasetPath(allPaths, 'Coordinates/x');
     if isempty(xcoordPath), xcoordPath = ['/' defStep.dic_group '/Coordinates/x']; end
-    xcoord = h5read(dicFilePath, xcoordPath);
-    dataSize = size(xcoord);
-    tmp_v = abs(diff(xcoord, 1, 1)); var_v = nanmedian(tmp_v(:));
-    tmp_h = abs(diff(xcoord, 1, 2)); var_h = nanmedian(tmp_h(:));
-    isTransposed = (var_v > var_h);
-    if isTransposed, xcoord = xcoord'; end
-    stepsize = abs(xcoord(2,1)-xcoord(1,1));
-    if stepsize == 0, stepsize = abs(xcoord(1,2)-xcoord(1,1)); end
-    if stepsize == 0, stepsize = 1; end
+    
+    ycoordPath = findDatasetPath(allPaths, 'Coordinates/y');
+    if isempty(ycoordPath), ycoordPath = ['/' defStep.dic_group '/Coordinates/y']; end
+    
+    maskPath = findDatasetPath(allPaths, 'Coordinates/Mask');
+    if isempty(maskPath), maskPath = ['/' defStep.dic_group '/Coordinates/Mask']; end
+    
+    uxPath = findDatasetPath(allPaths, 'Displacements/x-displacement');
+    if isempty(uxPath), uxPath = ['/' defStep.dic_group '/Displacements/x-displacement']; end
+    
+    uyPath = findDatasetPath(allPaths, 'Displacements/y-displacement');
+    if isempty(uyPath), uyPath = ['/' defStep.dic_group '/Displacements/y-displacement']; end
 
-    x0 = rawData.SE_raw.imregion(1); y0 = rawData.SE_raw.imregion(2);
-    x1 = rawData.SE_raw.imregion(3) + x0; y1 = rawData.SE_raw.imregion(4) + y0;
-    rawData.DIC = struct(); rawData.DIC.names = {}; baseName = defStep.dic_group;
-
+    try
+        X_dic_raw = double(h5read(dicFilePath, xcoordPath));
+        Y_dic_raw = double(h5read(dicFilePath, ycoordPath));
+        u_dic_raw = double(h5read(dicFilePath, uxPath));
+        v_dic_raw = double(h5read(dicFilePath, uyPath));
+    catch ME
+        warning('Could not read core DaVis coordinates/displacements. Skipping DIC import. (%s)', ME.message);
+        continue;
+    end
+    
+    try
+        Mask_raw = double(h5read(dicFilePath, maskPath));
+    catch
+        Mask_raw = ones(size(X_dic_raw));
+    end
+    
+    % --- Determine true spatial offsets from SE_raw mapping ---
+    % SE_raw crop coordinates (1-based index mapped to 0-based physical origin)
+    x0 = rawData.SE_raw.imregion(1) - 1; 
+    y0 = rawData.SE_raw.imregion(2) - 1; 
+    
+    % Extract physical scaling
+    psize = rawData.SE_raw.psize;
+    if isempty(psize) || isnan(psize) || psize == 0, psize = 1; end
+    
+    % --- Valid Eulerian Forward Cloud Construction ---
+    % 1. Must be physically tracked by DaVis (Mask > 0)
+    % 2. Must have valid displacements (not NaN and not exactly 0.0)
+    valid_mask = ~isnan(u_dic_raw) & ~isnan(v_dic_raw) & ...
+                 (u_dic_raw ~= 0.0) & (v_dic_raw ~= 0.0) & ...
+                 (Mask_raw > 0);
+    
+    % Map to physical EBSD reference frame (Standard Forward Warping: X + u, Y + v)
+    X_def_phys = (X_dic_raw(valid_mask) + u_dic_raw(valid_mask) - x0) * psize;
+    Y_def_phys = (Y_dic_raw(valid_mask) + v_dic_raw(valid_mask) - y0) * psize;
+    
+    % --- Pre-Interpolation Verification Scatter Plot ---
+    fprintf('  -> Saving pre-interpolation scatter plot for raw DIC subset...\n');
+    fig_raw = figure('Visible', 'off');
+    
+    grid_sz = size(newEBSD);
+    x_ext = [min(newEBSD.x(:)), max(newEBSD.x(:))];
+    y_ext = [min(newEBSD.y(:)), max(newEBSD.y(:))];
+    SE_img = reshape(newEBSD.prop.SE_raw, grid_sz);
+    
+    % Plot the background SE image in grayscale
+    ax1 = axes('Parent', fig_raw);
+    imagesc(ax1, x_ext, y_ext, SE_img); 
+    colormap(ax1, 'gray');
+    axis(ax1, 'image'); axis(ax1, 'off');
+    
+    % Overlay scatter on a second transparent axis so colormaps don't conflict
+    ax2 = axes('Parent', fig_raw, 'Position', ax1.Position);
+    v_valid = v_dic_raw(valid_mask);
+    scatter(ax2, X_def_phys, Y_def_phys, 10, v_valid, 'filled', 'MarkerFaceAlpha', 0.25, 'MarkerEdgeColor', 'none');
+    axis(ax2, 'image'); axis(ax2, 'off');
+    xlim(ax2, x_ext); ylim(ax2, y_ext);
+    set(ax2, 'Color', 'none', 'YDir', ax1.YDir, 'XDir', ax1.XDir); % Sync axis directions!
+    colormap(ax2, 'parula');
+    
+    title(ax2, sprintf('Step %s: Raw Unstructured DIC Points (Pre-Interpolation)', defStep.stepName), 'Interpreter', 'none');
+    
+    if ~isempty(v_valid)
+        v_min = prctile(v_valid, 2);
+        v_max = prctile(v_valid, 98);
+        if v_max == v_min, v_max = v_min + 1; end
+        caxis(ax2, [v_min, v_max]);
+    end
+    cb = colorbar(ax2); cb.Title.String = 'Raw Displacement y';
+    exportScaledFigure(fig_raw, fullfile(input.outPath, [defStep.stepName, '_RawDIC_PreInterpolation_.png']), 'nodatestring');
+    close(fig_raw);
+    
+    % --- Initialize Single Caching scatteredInterpolant ---
+    fprintf('  -> Constructing 2D Delaunay Triangulation on Deformed Frame (%d valid tracked points)...\n', sum(valid_mask(:)));
+    tic;
+    % Using 'natural' inside for smooth, artifact-free Voronoi neighbor interpolation (fixes barcode effect)
+    % and crucially 'none' for extrapolation to prevent edge smearing artifacts!
+    F_dic = scatteredInterpolant(X_def_phys, Y_def_phys, ones(size(X_def_phys)), 'natural', 'none');
+    t_del = toc;
+    % --- Compute Concave Hull to Prevent Extrapolation Across Notches ---
+    fprintf('  -> Computing Alpha Shape (Concave Hull) to remove convex hull artifacts...\n');
+    tic;
+    % Estimate DIC grid point spacing in physical units to set a tight Alpha radius
+    step_x = nanmedian(diff(X_dic_raw(1,:))) * psize;
+    if step_x == 0, step_x = nanmedian(diff(X_dic_raw(:,1))) * psize; end
+    step_y = nanmedian(diff(Y_dic_raw(:,1))) * psize;
+    if step_y == 0, step_y = nanmedian(diff(Y_dic_raw(1,:))) * psize; end
+    nominal_spacing = max(abs(step_x), abs(step_y));
+    if nominal_spacing == 0 || isnan(nominal_spacing), nominal_spacing = 10; end
+    
+    % A radius of ~2.5x the grid spacing safely wraps the true boundaries 
+    % without poking holes inside the domain, but tightly crops the hourglass notches.
+    ashape = alphaShape(X_def_phys, Y_def_phys, nominal_spacing * 2.5);
+    in_hull = inShape(ashape, newEBSD.x, newEBSD.y);
+    t_shape = toc;
+    fprintf('  -> Concave hull mask generated in %.2f s (Grid spacing: %.1f um). Interpolating %d data fields...\n', t_shape, nominal_spacing, numel(allPaths));
+    
+    % --- Interpolate All DIC Data Fields ---
+    tic;
+    baseName = defStep.dic_group;
+    rawData.DIC = struct(); 
+    rawData.DIC.names = {};
+    
     for k = 1:numel(allPaths)
         fullPath = allPaths{k};
-        try, data = h5read(dicFilePath, fullPath); catch, continue; end
+        try, raw_field = double(h5read(dicFilePath, fullPath)); catch, continue; end
         
+        % Check if field matches spatial dimensions
+        if numel(raw_field) ~= numel(X_dic_raw)
+            continue; 
+        end
+        
+        % Construct valid struct name
         rel = strrep(fullPath, ['/' defStep.dic_group '/'], '');
         dsSuffix = strjoin(strsplit(rel, '/'), '_');
         shortName = matlab.lang.makeValidName([baseName '_' dsSuffix]);
         
-        if ~isnumeric(data) || numel(data) ~= numel(xcoord)
-            rawData.DIC.(shortName) = data;
-            continue;
-        end
+        % Set all non-valid points (outside mask or exactly 0.0) to NaN explicitly
+        raw_field(~valid_mask) = NaN;
         
-        if size(data, 1) ~= targetM && size(data, 2) == targetM, data = data'; end
-        if isTransposed, data = data'; end
+        % Extract valid points and rapidly interpolate onto EBSD grid
+        F_dic.Values = raw_field(valid_mask);
+        interp_data = F_dic(newEBSD.x, newEBSD.y);
         
-        if isequal(size(data), targetSize)
-            subdata = extractRegion(data, x0, y0, x1, y1, rel);
-        else
-            if contains(rel, 'Coordinates')
-                if data(1,1) < data(2,1), subdata = repmat(1:targetN, targetM, 1);
-                elseif data(1,1) < data(1,2), subdata = repmat((1:targetM)', 1, targetN);
-                else, subdata = kron(data, ones(stepsize)); end
-            else, subdata = kron(data, ones(stepsize)); end
-            subdata = extractRegion(subdata, x0, y0, x1, y1, rel);
-        end
-        rawData.DIC.(shortName) = subdata;
+        % Destroy the false convex hull interpolation across the notches!
+        interp_data(~in_hull) = NaN; 
+        newEBSD.prop.(shortName) = interp_data;
+        
+        % Save to rawData to maintain backwards compatibility
+        rawData.DIC.(shortName) = raw_field; 
         rawData.DIC.names{end+1} = shortName;
     end
-
-    % %% ====================================================================
-    % %  [TROUBLESHOOTING BLOCK] SINGLE-FIELD (uy) FORWARD WARPING EVALUATION
-    % %  ====================================================================
-    % %  Comment out or remove this block once the proper warping formula is verified!
-    % fprintf('\n[TROUBLESHOOTING MODE] Isolating forward warping on single test field (uy)...\n');
-    % dicNames_ts = rawData.DIC.names;
-    % ux_idx_ts = find(contains(dicNames_ts, 'x_displacement', 'IgnoreCase', true), 1);
-    % uy_idx_ts = find(contains(dicNames_ts, 'y_displacement', 'IgnoreCase', true), 1);
-    % 
-    % if ~isempty(ux_idx_ts) && ~isempty(uy_idx_ts)
-    %     ux_ts = double(rawData.DIC.(dicNames_ts{ux_idx_ts}));
-    %     uy_ts = double(rawData.DIC.(dicNames_ts{uy_idx_ts}));
-    %     test_field = uy_ts; % We isolate uy for rapid diagnostics
-    %     test_name  = dicNames_ts{uy_idx_ts};
-    % 
-    %     % Check spatial coordinate alignment and report diagnostics
-    %     fprintf('  -> Diagnostics: SE_raw X range [%.2f, %.2f] | DIC uy size [%d, %d] | newEBSD size [%d, %d]\n', ...
-    %             min(rawData.SE_raw.X(:)), max(rawData.SE_raw.X(:)), size(uy_ts,1), size(uy_ts,2), size(newEBSD,1), size(newEBSD,2));
-    % 
-    %     valid_ts = ~isnan(rawData.SE_raw.X(:)) & ~isnan(rawData.SE_raw.Y(:)) & ~isnan(test_field(:));
-    %     V_flat_ts = test_field(valid_ts);
-    % 
-    %     % --- Build 4 Warping Hypotheses ---
-    %     tStart = tic
-    %     n = 4;
-    %     T = zeros(1,n);
-    %     % 1. Un-warped Baseline
-    %     F1 = scatteredInterpolant(rawData.SE_raw.X(valid_ts), rawData.SE_raw.Y(valid_ts), V_flat_ts, 'linear', 'none');
-    %     uy_out1 = F1(newEBSD.x, newEBSD.y);
-    %     T(1)= toc
-    %     % 2. Standard Forward Warping (Current: X + ux, Y + uy)
-    %     X_fwd2 = rawData.SE_raw.X(valid_ts) + ux_ts(valid_ts);
-    %     Y_fwd2 = rawData.SE_raw.Y(valid_ts) + uy_ts(valid_ts);
-    %     F2 = scatteredInterpolant(X_fwd2, Y_fwd2, V_flat_ts, 'linear', 'none');
-    %     uy_out2 = F2(newEBSD.x, newEBSD.y);
-    %     T(2)= toc
-    %     % 3. Y-Polarity Inverted Warping (X + ux, Y - uy) [Hypothesis 1: DaVis Y vs MTEX Y flip]
-    %     Y_fwd3 = rawData.SE_raw.Y(valid_ts) - uy_ts(valid_ts);
-    %     F3 = scatteredInterpolant(X_fwd2, Y_fwd3, V_flat_ts, 'linear', 'none');
-    %     uy_out3 = F3(newEBSD.x, newEBSD.y);
-    %     T(3)= toc
-    %     % 4. Full Sign Inverted Warping (X - ux, Y - uy) [Hypothesis 2: Reference vs Target inversion]
-    %     X_fwd4 = rawData.SE_raw.X(valid_ts) - ux_ts(valid_ts);
-    %     Y_fwd4 = rawData.SE_raw.Y(valid_ts) - uy_ts(valid_ts);
-    %     F4 = scatteredInterpolant(X_fwd4, Y_fwd4, V_flat_ts, 'linear', 'none');
-    %     uy_out4 = F4(newEBSD.x, newEBSD.y);
-    %     T(4)= toc
-    %     % --- Render Comparative 2x2 Overlay Studio ---
-    %     try
-    %         bg_ts = double(newEBSD.prop.SE_raw);
-    %     catch
-    %         try, bg_ts = double(newEBSD.ci); catch, bg_ts = ones(size(newEBSD)); end
-    %     end
-    % 
-    %     % fig_ts = figure('Name', sprintf('DIC Warping Diagnostics | Step: %s | Field: %s', defStep.stepName, test_name), ...
-    %     %                 'Color', 'w', 'Position', [50, 50, 1400, 900]);
-    %     % 
-    %     % hyp_data = {uy_out1, uy_out2, uy_out3, uy_out4};
-    %     % hyp_titles = {'1. Un-warped Baseline (X_raw, Y_raw)', ...
-    %     %               '2. Standard Forward (X+ux, Y+uy) [CURRENT]', ...
-    %     %               '3. Y-Polarity Inversion (X+ux, Y-uy) [HYPOTHESIS 1]', ...
-    %     %               '4. Full Sign Inversion (X-ux, Y-uy) [HYPOTHESIS 2]'};
-    %     % hyp_colors = {[0 0 0], [0.8 0 0], [0 0.5 0], [0 0 0.8]};
-    %     % ax_list = gobjects(1, 4);
-    %     % 
-    %     % for idx = 1:4
-    %     %     ax_list(idx) = subplot(2, 2, idx, 'Parent', fig_ts);
-    %     % 
-    %     %     % Plot grayscale SE_raw background natively via MTEX
-    %     %     plot(newEBSD, bg_ts, 'parent', ax_list(idx));
-    %     %     colormap(ax_list(idx), gray);
-    %     %     caxis(ax_list(idx), prctile(bg_ts(:), [1 99]));
-    %     %     hold(ax_list(idx), 'on');
-    %     % 
-    %     %     % Plot DIC overlay with alpha natively via MTEX
-    %     %     h = plot(newEBSD, hyp_data{idx}, 'parent', ax_list(idx));
-    %     %     try set(h, 'FaceAlpha', 0.55); catch; try set(h, 'AlphaData', 0.55); catch; end; end
-    %     % 
-    %     %     mtexColorMap(ax_list(idx), 'parula');
-    %     % 
-    %     %     % Set titles and labels
-    %     %     title(ax_list(idx), hyp_titles{idx}, 'FontSize', 12, 'FontWeight', 'bold', 'Color', hyp_colors{idx});
-    %     %     xlabel(ax_list(idx), 'x [\mum]'); ylabel(ax_list(idx), 'y [\mum]');
-    %     % end
-    %     % 
-    %     % linkaxes(ax_list, 'xy');
-    %     % drawnow;
-    %     figure; plot(newEBSD, uy_out1); title('out1'); figure; plot(newEBSD, uy_out2); title('out2'); figure; plot(newEBSD, uy_out3); title('out3'); figure; plot(newEBSD, uy_out4); title('out4');
-    %     fprintf('\n====================================================================\n');
-    %     fprintf('  TROUBLESHOOTING PAUSE ACTIVE:\n');
-    %     fprintf('  Compare the alignment of localization bands in subplots 2, 3, and 4\n');
-    %     fprintf('  against physical grain features on the underlying SE image.\n');
-    %     fprintf('  Type "return" or press Ctrl+C to continue or modify code.\n');
-    %     fprintf('====================================================================\n');
-    %     keyboard; % Breakpoint for experimentalist verification
-    % else
-    %     warning('Could not find ux or uy displacement fields for troubleshooting block.');
-    % end
-    % % ====================================================================
-
-    %% Eulerian Forward Warping (Optimized with Delaunay Caching)
-    dicNames = rawData.DIC.names;
-    ux_idx = find(contains(dicNames, 'x_displacement', 'IgnoreCase', true), 1);
-    uy_idx = find(contains(dicNames, 'y_displacement', 'IgnoreCase', true), 1);
-
-    if ~isempty(ux_idx) && ~isempty(uy_idx)
-        ux = double(rawData.DIC.(dicNames{ux_idx}));
-        uy = double(rawData.DIC.(dicNames{uy_idx}));
-        X_forward = rawData.SE_raw.X + ux;
-        Y_forward = rawData.SE_raw.Y + uy;
-        fprintf('  -> Applied forward displacement shift (X+u_x, Y+u_y) to coordinate grid.\n');
-    else
-        X_forward = rawData.SE_raw.X;
-        Y_forward = rawData.SE_raw.Y;
-    end
-
-    fprintf('  -> Interpolating %d fields via cached Delaunay Triangulation (25x speedup)...\n', numel(dicNames));
-    tic;
-    validMask = ~isnan(X_forward(:)) & ~isnan(Y_forward(:));
-    X_flat = X_forward(validMask);
-    Y_flat = Y_forward(validMask);
-
-    F = [];
-    for i = 1:numel(dicNames)
-        origName = dicNames{i};
-        dataRaw = double(rawData.DIC.(origName));
-        V_flat = dataRaw(validMask);
-        
-        if isempty(F)
-            % Compute Delaunay triangulation ONCE on the very first field
-            F = scatteredInterpolant(X_flat, Y_flat, V_flat, 'linear', 'none');
-        else
-            % Re-use existing Delaunay triangulation for subsequent fields (instantaneous)
-            F.Values = V_flat;
-        end
-        
-        interpData = F(newEBSD.x, newEBSD.y);
-        newEBSD.prop.(origName) = interpData;
-    end
     t_interp = toc;
-    fprintf('  -> Completed spatial forward interpolation in %.2f s\n', t_interp);
+    fprintf('  -> Completed Eulerian forward spatial interpolation in %.2f s\n', t_interp);
 
     %% Check & Apply Coordinate System Corrections via 2D Grid Dominance Analysis
     coord_x_fields = find(contains(fieldnames(newEBSD.prop), 'Coordinates_x', 'IgnoreCase', true));
@@ -514,14 +474,52 @@ for stepIdx = 2%1:numel(defSteps)
     exportScaledFigure(fig1, fullfile(input.outPath, [defStep.stepName, '_DeformedEBSD_SE_.png']), 'nodatestring');
     close(fig1);
 
-    if ~isempty(uy_idx)
-        fig2 = figure('Visible', 'off');
-        plot(newEBSD, SE_rgb); axis image off; hold on;
-        plot(newEBSD, newEBSD.prop.(dicNames{uy_idx})(:), 'FaceAlpha', 0.7);
-        title(sprintf('Step %s: Deformed EBSD with Forward-Mapped Displacement Y', defStep.stepName), 'Interpreter', 'none');
-        colormap('parula'); mtexColorbar('title', 'Forward Displacement y (Eulerian)');
-        exportScaledFigure(fig2, fullfile(input.outPath, [defStep.stepName, '_ForwardDIC_Overlay_.png']), 'nodatestring');
-        close(fig2);
+    if ~isempty(uyPath)
+        % Identify the sanitized struct field name for y_displacement
+        rel_y = strrep(uyPath, ['/' defStep.dic_group '/'], '');
+        dsSuffix_y = strjoin(strsplit(rel_y, '/'), '_');
+        uy_prop_name = matlab.lang.makeValidName([defStep.dic_group '_' dsSuffix_y]);
+        
+        if isfield(newEBSD.prop, uy_prop_name)
+            % Extract scalar data and compute percentiles
+            uy_data = newEBSD.prop.(uy_prop_name)(:);
+            valid_uy = uy_data(~isnan(uy_data));
+            
+            if ~isempty(valid_uy)
+                uy_min = prctile(valid_uy, 2);
+                uy_max = prctile(valid_uy, 98);
+                if uy_max == uy_min, uy_max = uy_min + 1; end
+                
+                % Normalize scalar data to [0, 1]
+                uy_norm = (uy_data - uy_min) ./ (uy_max - uy_min);
+                uy_norm = max(0, min(1, uy_norm));
+                
+                % Convert to RGB using parula colormap
+                cmap = parula(256);
+                idx = round(1 + 255 * uy_norm);
+                idx(isnan(idx)) = 1; % Temporary fallback for NaNs
+                uy_rgb_flat = reshape(ind2rgb(idx, cmap), [], 3);
+                
+                % Define alpha mask (0.55 where valid, 0 where NaN)
+                alpha_mask = 0.55 * double(~isnan(uy_data));
+                alpha_3d = repmat(alpha_mask, [1, 3]);
+                
+                % Agglomerate mathematically
+                SE_rgb_flat = reshape(SE_rgb, [], 3);
+                final_rgb = (1 - alpha_3d) .* SE_rgb_flat + alpha_3d .* uy_rgb_flat;
+                
+                fig2 = figure('Visible', 'off');
+                plot(newEBSD, final_rgb); axis image off; hold on;
+                
+                % Fake the colorbar scaling for the legend
+                colormap('parula'); caxis([uy_min, uy_max]);
+                title(sprintf('Step %s: Deformed EBSD with Forward-Mapped Displacement Y', defStep.stepName), 'Interpreter', 'none');
+                mtexColorbar('title', 'Forward Displacement y (Eulerian)');
+                
+                exportScaledFigure(fig2, fullfile(input.outPath, [defStep.stepName, '_ForwardDIC_Overlay_.png']), 'nodatestring');
+                close(fig2);
+            end
+        end
     end
 
     %% 4-Panel Coordinate System Visual Check
@@ -596,11 +594,9 @@ for stepIdx = 2%1:numel(defSteps)
         close(fig_grad);
         fprintf('  -> Saved 4-Panel Displacement Gradient Check figure to: %s\n', gradOutName);
     end
-    if false
     finalOutName = fullfile(input.outPath, [defStep.stepName, '_deformedEBSD_withForwardDIC.mat']);
     save(finalOutName, 'newEBSD', 'originalEBSD', 'grains', 'options', 'defStep');
     fprintf('  -> Saved complete FZ-projected dataset & grain object to: %s\n', finalOutName);
-    end
 end
 fprintf('\n========================================================================\n');
 fprintf('ALL DEFORMED FORWARD DATASETS COMPUTED AND SAVED SUCCESSFULLY!\n');

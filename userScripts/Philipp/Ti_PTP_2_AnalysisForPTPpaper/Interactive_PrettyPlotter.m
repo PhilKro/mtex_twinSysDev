@@ -296,9 +296,13 @@ function varargout = Interactive_PrettyPlotter(ebsd, grains, varargin)
         set(chk_crop_spec, 'Enable', 'off', 'String', 'Crop (No Specimen Mask)');
     end
 
-    uicontrol('Parent', pan, 'Style', 'text', 'String', 'Grain Boundary Style:', ...
-              'Units', 'normalized', 'Position', [0.04, 0.56, 0.45, 0.028], ...
+    uicontrol('Parent', pan, 'Style', 'text', 'String', 'GB Style:', ...
+              'Units', 'normalized', 'Position', [0.04, 0.56, 0.20, 0.028], ...
               'HorizontalAlignment', 'left', 'BackgroundColor', pan.BackgroundColor, 'FontWeight', 'bold');
+    chk_micronbar = uicontrol('Parent', pan, 'Style', 'checkbox', 'String', 'Micron Bar', ...
+                              'Units', 'normalized', 'Position', [0.24, 0.56, 0.25, 0.028], ...
+                              'BackgroundColor', pan.BackgroundColor, 'FontWeight', 'bold', 'FontSize', 9, ...
+                              'Value', 1, 'TooltipString', 'Display a dynamic scale bar.');
     gb_styles = {'White (1.2 px)', 'Black (1.2 px)', 'White (2.0 px)', 'Black (2.0 px)', 'Hidden / None'};
     pu_gb     = uicontrol('Parent', pan, 'Style', 'popupmenu', 'String', gb_styles, ...
                           'Units', 'normalized', 'Position', [0.50, 0.555, 0.46, 0.032], 'FontSize', 10);
@@ -424,7 +428,7 @@ function varargout = Interactive_PrettyPlotter(ebsd, grains, varargin)
                 'pu_ipf', pu_ipf, 'pu_dir', pu_dir, 'pu_prop_ov', pu_prop_ov, 'pu_cmap', pu_cmap, ...
                 'sl_alpha', sl_alpha, 'lbl_alpha', lbl_alpha, 'chk_above_bp', chk_above_bp, 'chk_below_wp', chk_below_wp, ...
                 'pu_ipf_thresh', pu_ipf_thresh, 'lbl_ipf_thresh', lbl_ipf_thresh, 'sl_ipf_thresh', sl_ipf_thresh, ...
-                'chk_mask_spec', chk_mask_spec, 'chk_crop_spec', chk_crop_spec, ...
+                'chk_mask_spec', chk_mask_spec, 'chk_crop_spec', chk_crop_spec, 'chk_micronbar', chk_micronbar, ...
                 'pu_gb', pu_gb, 'pu_bg', pu_bg, 'chk_inv', chk_inv, 'sl_bp', sl_bp, 'lbl_bp', lbl_bp, ...
                 'sl_wp', sl_wp, 'lbl_wp', lbl_wp, 'sl_gam', sl_gam, 'lbl_gam', lbl_gam, 'btn_auto', btn_auto, ...
                 'ed_name', ed_name, 'ed_px', ed_px, 'ed_dpi', ed_dpi, 'pu_fmt', pu_fmt, ...
@@ -447,6 +451,7 @@ function varargout = Interactive_PrettyPlotter(ebsd, grains, varargin)
     set(pu_ipf_thresh, 'Callback', @(s, e) onIpfThreshPropChange(fig));
     set(chk_mask_spec, 'Callback', @(s, e) onSliderChange(fig));
     set(chk_crop_spec, 'Callback', @(s, e) onSliderChange(fig));
+    set(chk_micronbar, 'Callback', @(s, e) onSliderChange(fig));
     set(pu_bg,         'Callback', @(s, e) onBgChange(fig));
     set(chk_inv,       'Callback', @(s, e) onSliderChange(fig));
     set(pu_gb,         'Callback', @(s, e) onGbChange(fig));
@@ -549,6 +554,7 @@ function updated_opts = saveCurrentSettingsToOpts(fig)
     
     updated_opts.mask_spec = (get(ui.chk_mask_spec, 'Value') == 1);
     updated_opts.crop_spec = (get(ui.chk_crop_spec, 'Value') == 1);
+    updated_opts.show_micronbar = (get(ui.chk_micronbar, 'Value') == 1);
 end
 
 function onBatchNavigate(fig, action)
@@ -760,6 +766,8 @@ function onImportOptions(fig)
         if isfield(p, 'crop_to_specimen'), set(ui.chk_crop_spec, 'Value', p.crop_to_specimen);
         elseif isfield(p, 'crop_spec'), set(ui.chk_crop_spec, 'Value', p.crop_spec); end
     end
+    
+    if isfield(p, 'show_micronbar'), set(ui.chk_micronbar, 'Value', p.show_micronbar); end
     
     % 8. Grain Boundary Style
     gb_style = '';
@@ -1141,8 +1149,17 @@ function updatePlot(fig)
         ipf_mask = ipf_mask & app.spec_loc;
     end
     
+    % Exclude NaN IPF colors from the mask
+    ipf_nan_mask = isnan(app.ipf_rgb(:,:,1));
+    ipf_mask = ipf_mask & ~ipf_nan_mask;
+    
     alpha_map = repmat(alpha_val * double(ipf_mask), [1, 1, 3]);
-    final_rgb = (1.0 - alpha_map) .* bg_rgb + alpha_map .* app.ipf_rgb;
+    
+    % Sanitize IPF RGB to prevent 0.0 * NaN = NaN poisoning in the background
+    safe_ipf_rgb = app.ipf_rgb;
+    safe_ipf_rgb(isnan(safe_ipf_rgb)) = 0;
+    
+    final_rgb = (1.0 - alpha_map) .* bg_rgb + alpha_map .* safe_ipf_rgb;
     final_rgb(nan_mask_3d) = 0.85; 
     
     if isempty(app.hImage) || ~isvalid(app.hImage)
@@ -1176,6 +1193,47 @@ function updatePlot(fig)
         end
     else
         set(app.ax, 'XLim', [min(app.x_range(:)), max(app.x_range(:))], 'YLim', [min(app.y_range(:)), max(app.y_range(:))]);
+    end
+    
+    % 5. Render Custom Dynamic Micron Bar
+    hBar = findobj(app.ax, 'Tag', 'CustomScaleBar');
+    delete(hBar);
+    
+    if get(app.ui.chk_micronbar, 'Value') == 1
+        x_lim = get(app.ax, 'XLim');
+        y_lim = get(app.ax, 'YLim');
+        width_um = diff(x_lim);
+        
+        % Target about 20% of the view width
+        order = 10^floor(log10(width_um * 0.2));
+        candidates = [1, 2, 5, 10] * order;
+        [~, idx_c] = min(abs(candidates - width_um * 0.2));
+        bar_width = candidates(idx_c);
+        
+        x_end = x_lim(2) - 0.05 * width_um;
+        x_start = x_end - bar_width;
+        
+        % Y position depends on YDir
+        if strcmpi(get(app.ax, 'YDir'), 'reverse')
+            y_pos = y_lim(2) - 0.05 * diff(y_lim); % bottom of image
+            y_text = y_pos - 0.01 * diff(y_lim); % slightly above line (smaller y)
+            valign = 'bottom';
+        else
+            y_pos = y_lim(1) + 0.05 * diff(y_lim); % bottom of image
+            y_text = y_pos + 0.01 * diff(y_lim); % slightly above line (larger y)
+            valign = 'bottom';
+        end
+        
+        % Draw thick black border line, then white inner line
+        line(app.ax, [x_start, x_end], [y_pos, y_pos], 'Color', 'k', 'LineWidth', 6, 'Tag', 'CustomScaleBar');
+        line(app.ax, [x_start, x_end], [y_pos, y_pos], 'Color', 'w', 'LineWidth', 3, 'Tag', 'CustomScaleBar');
+        
+        % Draw text with black background/edge so it's always readable
+        txt = sprintf('%g \\mum', bar_width);
+        text(app.ax, mean([x_start, x_end]), y_text, txt, ...
+            'Color', 'k', 'FontWeight', 'bold', 'FontSize', 12, 'HorizontalAlignment', 'center', ...
+            'VerticalAlignment', valign, 'Tag', 'CustomScaleBar', ...
+            'BackgroundColor', 'w', 'Margin', 1);
     end
     
     idx_bg = get(app.ui.pu_bg, 'Value'); bg_names = get(app.ui.pu_bg, 'String');
@@ -1259,7 +1317,21 @@ function onSaveExport(fig, isNext)
     % Use copyobj to directly clone the perfect, visible GUI axes without triggering MTEX axes reinitialization
     figExp = figure('Name', 'Export Renderer', 'Visible', 'on', 'Renderer', 'opengl', 'Position', [100, 100, 1050, 900], 'Color', 'w');
     axExp  = copyobj(app.ax, figExp);
-    set(axExp, 'Units', 'normalized', 'Position', [0.08, 0.08, 0.80, 0.86]);
+    
+    if mode_val == 2
+        set(axExp, 'Units', 'normalized', 'Position', [0.08, 0.08, 0.76, 0.86]);
+        try
+            % Recreate colorbar for export (copyobj doesn't copy the colorbar object automatically)
+            cmap_mat = colormap(app.ax);
+            colormap(axExp, cmap_mat);
+            try, clim(axExp, [cmin_val, cmax_val]); catch, caxis(axExp, [cmin_val, cmax_val]); end
+            cbExp = colorbar(axExp, 'Location', 'eastoutside');
+            ylabel(cbExp, strrep(sel_prop, '_', '\_'), 'FontWeight', 'bold', 'FontSize', 12);
+        catch
+        end
+    else
+        set(axExp, 'Units', 'normalized', 'Position', [0.08, 0.08, 0.84, 0.86]);
+    end
     
     % Ensure base composite image layer remains strictly beneath all boundary vector overlays
     img_cloned = findobj(axExp, 'Type', 'image');
@@ -1286,7 +1358,7 @@ function onSaveExport(fig, isNext)
                     'property_overlay', sel_prop, 'colormap', sel_cmap, 'cmin_val', cmin_val, 'cmax_val', cmax_val, ...
                     'alpha_overlay', alpha_val, 'restrict_above_bp', restrict_above_bp, 'restrict_below_wp', restrict_below_wp, ...
                     'ipf_thresh_property', sel_th_prop, 'ipf_thresh_value', thresh_val, ...
-                    'mask_to_specimen', mask_to_specimen, 'crop_to_specimen', crop_to_specimen, ...
+                    'mask_to_specimen', mask_to_specimen, 'crop_to_specimen', crop_to_specimen, 'show_micronbar', (get(ui.chk_micronbar, 'Value') == 1), ...
                     'black_point', bp_val, 'white_point', wp_val, 'gamma_val', gamma_val, ...
                     'grain_boundary_style', sel_gb, 'target_shorter_edge_px', target_px, 'dpi', dpi_val, ...
                     'export_timestamp', datestr(now, 'yyyy-mm-dd HH:MM:SS'), 'final_rgb_buffer', app.curr_rgb, ...
@@ -1324,6 +1396,7 @@ function onSaveExport(fig, isNext)
     fprintf(fid, '| **Overlay Property Filter** | `%s >= %.4f` | Independent domain thresholding without affecting background |\n', sel_th_prop, thresh_val);
     fprintf(fid, '| **Specimen Mask Applied** | `%s` | Mask out overlay coloring outside specimen boundary |\n', mat2str(mask_to_specimen));
     fprintf(fid, '| **Map Cropped to Specimen** | `%s` | Dynamically fit axes bounding box around specimen boundary |\n', mat2str(crop_to_specimen));
+    fprintf(fid, '| **Show Micron Bar** | `%s` | Render dynamic scale bar in bottom right corner |\n', mat2str(get(ui.chk_micronbar, 'Value') == 1));
     fprintf(fid, '| **Grain Boundaries** | `%s` | Boundary plotting style |\n\n---\n\n', sel_gb);
     
     fprintf(fid, '## Image Resolution & Hardware Specifications\n');
