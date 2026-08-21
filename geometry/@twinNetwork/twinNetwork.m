@@ -139,7 +139,7 @@ classdef twinNetwork < handle
             mori_pairs = [meanMoriCell{:}];
 
             % Ensure mori_pairs is a column and allMori is a row for broadcasting
-            angMatrix = angle(mori_pairs(:), allMori(:)'); % Returns P x N matrix
+            angMatrix = angle_outer(mori_pairs(:), allMori(:)'); % Returns P x N matrix
 
             % Favor lower generation twins by adding a penalty to higher generation angles
             validMatches = angMatrix < obj.twinThresh;
@@ -607,7 +607,12 @@ classdef twinNetwork < handle
                         grainIndices = id2idx(validPhysIds);
                         validIndices = grainIndices(grainIndices > 0);
                         
-                        areaSum = sum(obj.grains(validIndices).area);
+                        if isempty(validIndices)
+                            areaSum = 0;
+                        else
+                            areaSum = sum(obj.grains(validIndices).area);
+                        end
+
                         if areaSum > bestArea
                             bestArea = areaSum;
                             parentGroup = g;
