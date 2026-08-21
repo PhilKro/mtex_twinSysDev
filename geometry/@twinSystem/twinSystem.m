@@ -7,7 +7,6 @@ classdef twinSystem
         k2       % Conjugate twin plane
         rotAxis  % Zone axis
         twinType % Type of twin: 0:'Compound', 1:'Type I' or 2:'Type II'
-        parent   % Parent object (orientation, grain2d, or twinSystem)
         variantId % Variant ID
         
     end
@@ -79,28 +78,7 @@ classdef twinSystem
         else
             out = eq(tS.subSet(1),tS.subSet(2));
         end
-        end
-
-        
-        function [variantIndex] = variantDetermination2(tS, misOrientation, deviationInDegree)
-            warning('twinSystem:variantDetermination2:deprecated', 'variantDetermination2 has to be deleted, also purged from subsref.')
-            tSvariants = tS.symmetrise('antipodal');
-            variantPTM = tSvariants.parentTwinMisorientation();
-            if iscolumn(variantPTM)
-                if iscolumn(misOrientation)
-                    misOrientation = misOrientation.';
-                end
-            else
-                if isrow(misOrientation)
-                    misOrientation = misOrientation.'; 
-                end
-            end
-            variantMatch_angle = angle(misOrientation, variantPTM, 'noSym1') / degree;
-            variantMatch_logic = variantMatch_angle == min(variantMatch_angle, [], 2) & variantMatch_angle < deviationInDegree;
-            
-            variantIndex = variantMatch_logic * transpose(1:length(tSvariants));
-        end
-        
+        end      
 
         function isC = isCompound(tS)
             % % A twin is compound if the plane of shear S is a mirror plane.
@@ -111,7 +89,6 @@ classdef twinSystem
         end
 
         function misori = parentTwinMisorientation(tS)
-            warning('twinSystem:parentTwinMisorientation:deprecated', 'parentTwinMisorientation does not handle recursive twin objects yet.')
             % The misorientation depends on the twin type.
             misori = orientation.nan(tS.CS, tS.CS, size(tS));
 
@@ -121,7 +98,7 @@ classdef twinSystem
                 % Type I twin is defined by a reflection in the K1 plane.
                 % For centrosymmetric crystals, this is equivalent to a 180-degree rotation about the normal to K1.
                 warning('twinSystem:parentTwinMisorientation:type1Assumption', ...
-                    'The current implementation works with an improper rotation here. For orientation analysis this might not work (especially if you work with a non-centrosymmteric point group). Maybe the proper rotation should be implemented here aswell/instead?');
+                    'The current implementation works with an improper rotation here. For orientation analysis this might not work (especially if you work with a centrosymmteric point group). Maybe the proper rotation should be implemented here aswell/instead?');
                 misori(isType1OrCompound) = -orientation.byAxisAngle(tS.k1(isType1OrCompound), pi);
             end
             % Type II (2)
@@ -132,13 +109,11 @@ classdef twinSystem
             end
         end
 
-        function shear = shearMagnitude(tS)
-            warning('twinSystem:shearMagnitude:deprecated', 'shearMagnitude does not handle recursive twin objects yet. Might anyways be redundand with the shear method.')
-            shear = sqrt(4 * ((dot(tS.eta2.normalize, tS.k1.normalize).^-2) - 1));
+        function sM = shearMagnitude(tS)
+            [~, sM] = tS.shear();
         end
         
         function [shearvector, shearMagnitude] = shear(tS)
-            warning('twinSystem:shear:deprecated', 'Shearmagnitude does not handle recursive twin objects yet.')
             shearvector = 2 * (tS.k1.normalize - dot(tS.eta2.normalize, tS.k1.normalize).^-1 .* tS.eta2.normalize);
             shearvector.dispStyle = 'UVTW';
             shearMagnitude = norm(shearvector);
@@ -146,55 +121,15 @@ classdef twinSystem
         
         function defTensor = displacementGradient(tS, varargin)
             % DISPLACEMENTGRADIENT Calculates the displacement gradient (deformation tensor) of the twin
+            % strictly in the local crystal reference frame.
             %
             % Syntax
             %   defTensor = displacementGradient(tS)
-            %   defTensor = displacementGradient(tS, 'crystalCoords')
-            %
-            % Description
-            %   Calculates the local deformation tensor. If the twin object is attached 
-            %   to a parent with a defined orientation (e.g., grain2d or orientation), 
-            %   the tensor is returned in specimen coordinates. Pass 'crystalCoords' 
-            %   to force the output to remain in the crystal reference frame.
-            
-            crystalCoordsFlag = any(strcmpi(varargin, 'crystalCoords'));
-            
-            warning('twinSystem:displacementGradient:deprecated', 'Hopefully displacementGradient handles recursive twin objects correctly.')
-            % 1. Calculate the local deformation tensor in the parent crystal reference frame
-            defTensor = tS.shearMagnitude .* dyad(tS.eta1, tS.k1).normalize;
-
-            % 2. If no parent is attached or crystal coords explicitly requested, return the tensor in crystal coordinates
-            if crystalCoordsFlag || isempty(tS.parent) || all(cellfun('isempty', {tS.parent}))
-                return;
-            end
-
-            % 3. Retrieve the root parent to check if it is tied to specimen coordinates
-            superP = tS.superParent();
-
-            if isa(superP, 'orientation') || isa(superP, 'grain2d')
-                parents = [tS.parent];
-
-                % Extract the specimen orientation of the immediate parent
-                if isa(parents, 'twinSystem')
-                    pOri = parents.orientation();
-                elseif isa(parents, 'grain2d')
-                    pOri = parents.meanOrientation;
-                elseif isa(parents, 'orientation')
-                    pOri = parents;
-                else
-                    return;
-                end
-
-                % Ensure the parent orientation array matches the dimensions of the twin array
-                pOri = reshape(pOri, size(defTensor));
-
-                % 4. Transform the deformation tensor from crystal to specimen coordinates
-                defTensor = pOri .* defTensor;
-            end
+            [~, shearMagnitude] = tS.shear;
+            defTensor = shearMagnitude .* dyad(tS.eta1, tS.k1).normalize;
         end
         
         function correspondanceMatrix = correspondanceMatrix(tS)
-            warning('twinSystem:correspondanceMatrix:deprecated', 'correspondanceMatrix does not handle recursive twin objects yet.')
             correspondanceMatrix = -tensor.eye(tS.CS) + 2 * dyad(tS.eta2, tS.k1).normalize;
         end
 
@@ -294,165 +229,76 @@ classdef twinSystem
             end
         end
 
-        function tS = mtimes(A, B)
+        function out = mtimes(A, B)
             %MTIMES implement multiplication for twinSystem
             %
             % Syntax
-            %   tS_nested = tS1 * tS2
-            %   tS_active = ori * tS
-            %   tS_active = grains * tS
+            %   misori = tS1 * tS2
+            %   ori = ori * tS
+            %   ori = grains * tS
             
             if isa(A, 'twinSystem') && isa(B, 'twinSystem')
-                % Nesting: A is the parent of B
-                parentObj = A(:);
-                childObj = B(:);
-                
-                nParent = numel(parentObj.eta1);
-                nChild = numel(childObj.eta1);
-                
-                % Expand child (inner loop) -> [C1; C2; C1; C2]
-                tS = repmat(childObj, nParent, 1);
-                
-                % Expand parent (outer loop) -> [P1; P1; P2; P2]
-                % Use indexing for robustness with object arrays
-                idx = kron(1:nParent, ones(1, nChild)).';
-                parentsExpanded = parentObj.subSet(idx);
-                
-                % Assign parents
-                if nParent * nChild > 0
-                    tS.parent = parentsExpanded;
-                end
+                % Returns the compounded geometric misorientation
+                out = A.parentTwinMisorientation * B.parentTwinMisorientation;
                 
             elseif (isa(A, 'orientation') || isa(A, 'grain2d')) && isa(B, 'twinSystem')
-                % Activation: A is the root parent
-                tS = activate(B, A);
+                if isa(A, 'grain2d')
+                    oriA = A.meanOrientation;
+                else
+                    oriA = A;
+                end
+                
+                % Reshape oriA to match B dimensions if needed, or MTEX broadcast handles it
+                out = oriA .* B.parentTwinMisorientation;
+                
             else
-                tS = builtin('mtimes', A, B);
+                out = builtin('mtimes', A, B);
+            end
+        end
+
+        function F_total = calcDeformationSequence(tS_sym, variantPath, parentOri)
+            % CALCDEFORMATIONSEQUENCE Computes the total deformation gradient
+            % across a sequence of twin variants, optionally rotated into the specimen frame.
+            %
+            % Syntax
+            %   F_total = tS_sym.calcDeformationSequence(variantPath)
+            %   F_total = tS_sym.calcDeformationSequence(variantPath, parentOri)
+            %
+            % Note: This method expects tS_sym to be the symmetrized variant array.
+            
+            if isempty(variantPath)
+                F_total = eye(3);
                 return;
             end
-        end
-
-        function tS = activate(tS, parentObj)
-            % ACTIVATE Attach a parent (orientation/grain) to the twin system
-            %
-            % Syntax
-            %   tS = activate(tS, parentObj)
-           
-            if ~ eq(parentObj.CS, tS.CS)
-                error('twinSystem:activate:incompatibleCS', ...
-                    'The crystal symmetry of the parent orientation/grain must match that of the twin system.');
-            end
-
-            if ~isa(parentObj, 'grain2d')
-                parentObj = parentObj(:);
-            end
-            childObj = tS(:);
             
-            nParent = numel(parentObj);
-            if isa(parentObj, 'twinSystem')
-                nParent = numel(parentObj.eta1);
-            end
-
-            nChild = numel(childObj);
-            if isa(childObj, 'twinSystem')
-                nChild = numel(childObj.eta1);
-            end
+            F_total = eye(3);
             
-            % Expand child (inner loop) -> [C1; C2; C1; C2]
-            tS = repmat(childObj, nParent, 1);
-            
-            % Expand parent (outer loop) -> [P1; P1; P2; P2]
-            idx = kron(1:nParent, ones(1, nChild)).';
-            parentsExpanded = parentObj(idx);
-            
-            % Assign parents
-            if nParent * nChild > 0
-                tS.parent = parentsExpanded;
-            end
-        end
-
-        function ori = orientation(tS)
-            % ORIENTATION Calculate the twin orientation in specimen coordinates
-            
-            if isempty(tS),warning('twinSystem:orientation:empty', 'Your twin system is empty.'); ori = []; return; end
-            
-            % Check if parents are defined (handle object arrays safely)
-            parentsCell = {tS.parent};
-            if all(cellfun('isempty', parentsCell))
-                warning('twinSystem:orientation:noParent', ...
-                    'Parent orientation is not defined for any twin system in the array. Returning NaN orientations.');
-                ori = orientation.nan(tS.CS,size(tS)); 
-                return; 
-            end
-
-            % Recursively resolve parent orientation
-            % This concatenation will fail if parents are of mixed types (e.g. grain and orientation)
-            % which is desired behavior as we can't process mixed types easily.
-            parents = [tS.parent];
-            
-            % PROBOABLY A PROBLEM WITH twinSystem as parent
-            if isa(parents, 'twinSystem')
-                numparents = numel(parents.eta1);
-            else
-                numparents = numel(parents);
-            end
-
-            if numparents ~= numel(tS.eta1)
-                error('twinSystem:orientation:missingParent', ...
-                    'Parent orientation is not defined for all twin systems in the array.');
-            end
-
-            if isa(parents, 'twinSystem')
-                pOri = orientation(parents);
-            elseif isa(parents, 'grain2d')
-                pOri = parents.meanOrientation;
-            else
-                pOri = parents;
-            end
-            
-            % Reshape pOri to match tS dimensions
-            pOri = reshape(pOri, size(tS));
-
-            % Apply misorientation (Parent -> Twin)
-            ori = pOri .* tS.parentTwinMisorientation;
-        end
-
-        function [superP, n] = superParent(tS)
-            % SUPERPARENT Find the highest level parent of the given object
-            %
-            % Syntax
-            %   [superP, n] = superParent(tS)
-            %
-            % Output
-            %   superP - The root parent object (orientation, grain2d, or twinSystem)
-            %   n      - Number of layers traversed
-            
-            superP = tS;
-            n = 0;
-            
-            while isa(superP, 'twinSystem') && ~isempty(superP)
-                % Check if parents exist
-                parentsCell = {superP.parent};
+            % Compute crystal-frame sequential deformation
+            for p = 1:length(variantPath)
+                vIdx = variantPath(p);
+                % Inside class methods, array indexing bypasses custom subsref.
+                % We MUST use select() to safely index the vectorized object.
+                vTS = tS_sym.select(vIdx);
                 
-                % If any element is missing a parent, we stop to avoid returning
-                % a mixed list or erroring on concatenation.
-                if any(cellfun('isempty', parentsCell))
-                    break;
+                H_tensor = vTS.displacementGradient;
+                if isa(H_tensor, 'tensor') || isa(H_tensor, 'tensor3')
+                    H_mat = H_tensor.M;
+                else
+                    H_mat = double(H_tensor);
                 end
                 
-                % Move up one level
-                try
-                    nextParents = [superP.parent];
-                catch
-                    warning('twinSystem:superParent:mixedParents', ...
-                        'Could not concatenate parents. They might be of mixed types.');
-                    break;
-                end
-                
-                superP = nextParents;
-                n = n + 1;
+                F_step = eye(3) + H_mat;
+                F_total = F_step * F_total;
+            end
+            
+            % Transform tensor from crystal to specimen coordinates using the parent orientation
+            if nargin > 2 && ~isempty(parentOri)
+                % Tensor rotation: R * F * R^T
+                R = parentOri.matrix;
+                F_total = R * F_total * R';
             end
         end
+
 
         function n = length(tS)
             if isempty(tS)

@@ -9,8 +9,4 @@ tS.rotAxis = repmat(tS.rotAxis,varargin{:});
 tS.CRSS = repmat(tS.CRSS,varargin{:});
 tS.twinType = repmat(tS.twinType,varargin{:});
 tS.variantId = repmat(tS.variantId,varargin{:});
-
-if ~isempty(tS.parent)
-    tS.parent = repmat(tS.parent,varargin{:});
-end
 end
