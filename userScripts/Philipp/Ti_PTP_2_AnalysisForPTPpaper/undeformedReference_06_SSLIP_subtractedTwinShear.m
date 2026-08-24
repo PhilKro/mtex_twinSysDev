@@ -14,7 +14,7 @@ clear; close all; clc;
 
 addpath('c:\Users\phkr\MTEX_workEnv\userScripts\HelperFunctions');
 addpath('c:\Users\phkr\MTEX_workEnv\geometry');
-addpath('c:\Users\phkr\MTEX_workEnv\userScripts\SSLIP\src');
+addpath('c:\Users\phkr\MTEX_workEnv\userScripts\SSLIP'); initSSLIP();
 
 plotx2east;
 plotzIntoPlane;
@@ -313,10 +313,7 @@ for idx_inc = inc_indices
         twinMis = tS_sym(v).parentTwinMisorientation;
 
         parentOri_twinned = originalParentOri * twinMis;
-        
-        % Initialize storage for shear scaling parameter series evaluation
         num_factors = length(cfg.shear_scaling_factor);
-        shear_series = repmat(struct('valid', false), length(valid_grains), num_factors);
         
         % --- Loop Over Twinning Shear Scaling Factor Series ---
         for f_idx = 1:num_factors
@@ -423,238 +420,72 @@ for idx_inc = inc_indices
                 
                 plotBaseName = sprintf('%s_SSLIP_Grain%d_Var%d_%s%s', prefix, grainId, v, factor_tag, file_tag);
                 
-                IDoptions.IDMethod       = cfg.sslip_method;
-                IDoptions.filterSize     = 4;
-                IDoptions.coarsegrain    = 4;
-                IDoptions.threshResidual = cfg.threshResidual;
+                clear ssl_cfg
+                close all
+                
+                % -------------------------------------------------------------
+                % Configure SSLIP run (Modern Architecture)
+                % -------------------------------------------------------------
+                ssl_cfg = struct();
+                ssl_cfg.preprocess.filterSize = 4;
+                ssl_cfg.preprocess.coarsegrain = 4;
+                
+                ssl_cfg.solver.IDMethod = cfg.sslip_method;
+                ssl_cfg.solver.threshResidual = cfg.threshResidual;
                 if isfield(cfg, 'threshResidualFraction')
-                    IDoptions.threshResidualFraction = cfg.threshResidualFraction;
+                    ssl_cfg.solver.threshResidualFraction = cfg.threshResidualFraction;
                 end
-                IDoptions.minEeff        = cfg.minEeff;
-                IDoptions.posConstr      = cfg.posConstr;
-                IDoptions.plotSSLIP      = 1;
-                IDoptions.layout         = [];
-                IDoptions.plotTraces     = 1;
-                IDoptions.stress         = stressState;
-                IDoptions.casename       = plotBaseName;
-                IDoptions.plotDefGrad    = 1;
-                IDoptions.saveFig        = 1;
-                IDoptions.plotname       = fullfile(outDir, plotBaseName);
-                IDoptions.sizeAdjust     = 0.5;
-                IDoptions.plotResidual   = 1;
-                if isfield(cfg, 'logscale'), IDoptions.logscale = cfg.logscale; else, IDoptions.logscale = 0; end
-                if isfield(cfg, 'maxE'), IDoptions.maxE = cfg.maxE; end
-                if isfield(cfg, 'clim_percentile'), IDoptions.clim_percentile = cfg.clim_percentile; end
-                IDoptions.logmin         = 0.01;
-                try, IDoptions.cmap = viridis(512); catch, IDoptions.cmap = parula(256); end
+                ssl_cfg.solver.minEeff = cfg.minEeff;
+                ssl_cfg.solver.posConstr = cfg.posConstr; 
+                ssl_cfg.solver.NoSs = 1:length(sS_filt);
+                
+                % Turn on Vectorized ADMM solver
+                ssl_cfg.solver.ADMM = 1;
+                ssl_cfg.solver.ADMM_iters = 150;
+                
+                ssl_cfg.plot.stress = stressState;
+                ssl_cfg.plot.casename = plotBaseName;
+                ssl_cfg.plot.plotDefGrad = 1;
+                ssl_cfg.plot.saveFig = 1;
+                ssl_cfg.plot.plotname = fullfile(outDir, plotBaseName);
+                ssl_cfg.plot.ori = parentOri_twinned;
+                ssl_cfg.plot.outputReport = fullfile(outDir, [plotBaseName, '_TwinnedLattice_SlipSystems.csv']);
+                ssl_cfg.plot.sizeAdjust = 0.5;
+                ssl_cfg.plot.plotResidual = 1;
+                ssl_cfg.plot.plotTraces = 1;
+                if isfield(cfg, 'logscale'), ssl_cfg.plot.logscale = cfg.logscale; else, ssl_cfg.plot.logscale = 0; end
+                if isfield(cfg, 'maxE'), ssl_cfg.plot.maxE = cfg.maxE; end
+                if isfield(cfg, 'clim_percentile'), ssl_cfg.plot.clim_percentile = cfg.clim_percentile; end
+                ssl_cfg.plot.logmin = 0.01;
+                try, ssl_cfg.plot.cmap = viridis(512); catch, ssl_cfg.plot.cmap = parula(256); end
+                
                 if is_no_correction
-                    IDoptions.comment    = sprintf('Inc_%s_Grain_%d_TwinnedVar_%d_NoCorrection%s', prefix, grainId, v, file_tag);
+                    ssl_cfg.plot.comment = sprintf('Inc_%s_Grain_%d_TwinnedVar_%d_NoCorrection%s', prefix, grainId, v, file_tag);
                 else
-                    IDoptions.comment    = sprintf('Inc_%s_Grain_%d_TwinnedVar_%d_%s%s', prefix, grainId, v, factor_tag, file_tag);
+                    ssl_cfg.plot.comment = sprintf('Inc_%s_Grain_%d_TwinnedVar_%d_%s%s', prefix, grainId, v, factor_tag, file_tag);
                 end
-                IDoptions.NoSs           = 1:length(sS_filt);
                 
                 % Feed decoupled secondary slip gradients into optimizer
-                IDoptions.Hxx = ebsd_grain.prop.Hxx_sub;
-                IDoptions.Hxy = ebsd_grain.prop.Hxy_sub;
-                IDoptions.Hyx = ebsd_grain.prop.Hyx_sub;
-                IDoptions.Hyy = ebsd_grain.prop.Hyy_sub;
+                DefData = struct();
+                DefData.Hxx = ebsd_grain.prop.Hxx_sub;
+                DefData.Hxy = ebsd_grain.prop.Hxy_sub;
+                DefData.Hyx = ebsd_grain.prop.Hyx_sub;
+                DefData.Hyy = ebsd_grain.prop.Hyy_sub;
                 
                 try
-                    [ebsdID, optOut] = SSLIP(ebsd_grain, U, V, sSLocal_filt, IDoptions);
+                    fprintf('     Running SSLIP optimization (Vectorized)...\n');
+                    [ebsdID, prepData, optOut] = SSLIP(ebsd_grain, DefData, sSLocal_filt, ssl_cfg);
                     
-                    % Calculate robust metrics (Combined Error Index & Correlation Rate)
-                    Eeff_eval = ebsdID.prop.Eeff(:);
-                    eval_mask = (Eeff_eval >= cfg.minEeff) & ~isnan(Eeff_eval);
-                    
-                    res_map  = ebsdID.prop.residualEeff(:);
-                    res_eval = res_map(eval_mask);
-                    total_attempted = sum(eval_mask);
-                    
-                    corr_mask = ~isnan(res_eval) & (res_eval < cfg.threshResidual);
-                    num_corr  = sum(corr_mask);
-                    corr_rate = (num_corr / max(1, total_attempted)) * 100;
-                    corr_frac = num_corr / max(1, total_attempted);
-                    
-                    if num_corr > 0
-                        r_corr = mean(res_eval(corr_mask));
-                    else
-                        r_corr = cfg.threshResidual;
-                    end
-                    
-                    % Combined Error Index: scales actual mean residual by inverse correlation fraction!
-                    % Avoids threshold domination while preserving high sensitivity to unexplained area.
-                    m_res = r_corr / max(1e-3, corr_frac);
-                    
-                    mean_acts = mean(ebsdID.prop.slipIDcor, 1, 'omitnan');
-                    [sort_acts, sort_idx_act] = sort(mean_acts, 'descend');
-                    
-                    top_str = '';
-                    for t_i = 1:min(3, length(sort_idx_act))
-                        sys_idx = sort_idx_act(t_i);
-                        sys_obj = sS_filt(sys_idx);
-                        if sys_obj.b.norm > 4.0, fam_str = 'Pyr <c+a>';
-                        elseif abs(sys_obj.n.z) > 0.95, fam_str = 'Basal <a>';
-                        elseif abs(sys_obj.n.z) < 0.05, fam_str = 'Prism <a>';
-                        else, fam_str = 'Pyr <a>'; end
-                        top_str = [top_str, sprintf('%s (%s) [SF=%.2f, γ=%.4f]; ', fam_str, sys_obj.b.char, abs(sSLocal_filt(sys_idx).SchmidFactor(stressState)), sort_acts(t_i))];
-                    end
-                    
-                    shear_series(g_i, f_idx).valid         = true;
-                    shear_series(g_i, f_idx).factor_val    = factor_val;
-                    shear_series(g_i, f_idx).factor_tag    = factor_tag;
-                    shear_series(g_i, f_idx).penalized_res = m_res;
-                    shear_series(g_i, f_idx).corr_rate     = corr_rate;
-                    shear_series(g_i, f_idx).total_gam     = sum(mean_acts);
-                    shear_series(g_i, f_idx).top_sys       = top_str;
-                    shear_series(g_i, f_idx).plotBaseName  = plotBaseName;
+                    % External plotting decoupling
+                    plotSSLIP(ebsdID, sSLocal_filt, optOut);
                     
                     resMatPath = fullfile(outDir, [plotBaseName, '_SSLIP_results.mat']);
                     save(resMatPath, 'ebsdID', 'sSLocal_filt', 'optOut', 'grainId', 'parentOri_twinned', 'v', 'factor_val', 'is_no_correction', 'cfg');
                     
-                    SF = abs(SchmidFactor(sSLocal_filt, stressState));
-                    SF = round(SF*1000)/1000;
-                    
-                    T = table((1:length(sS_filt))', arrayfun(@(x) x.b.char, sS_filt, 'UniformOutput', false), ...
-                              arrayfun(@(x) x.n.char, sS_filt, 'UniformOutput', false), SF', ...
-                              'VariableNames', {'SlipSystem_ID', 'Burgers_Vector_b', 'Plane_Normal_n', 'Schmid_Factor_TwinnedLattice'});
-                    
-                    writetable(T, fullfile(outDir, [plotBaseName, '_TwinnedLattice_SlipSystems.csv']));
                     fprintf('     -> Complete! Saved figures and CSV table to %s\n', outDir);
                 catch ME
                     warning('     SSLIP optimization failed for Grain %d (Var %d | %s) in increment %s:\n        %s', grainId, v, factor_tag, prefix, ME.message);
                 end
-            end
-        end
-        
-        % =========================================================================
-        % SHEAR SCALING PARAMETER SERIES SUMMARY, SENSITIVITY PLOT & REPORT
-        % =========================================================================
-        if num_factors > 1
-            for g_i = 1:length(valid_grains)
-                grainId = valid_grains(g_i).id;
-                g_series = shear_series(g_i, :);
-                g_series = g_series([g_series.valid]);
-                
-                if isempty(g_series), continue; end
-                
-                % Rank by Combined Error Index
-                all_res = [g_series.penalized_res];
-                [~, sort_rank] = sort(all_res, 'ascend');
-                ranked_series = g_series(sort_rank);
-                
-                % 1. Print Leaderboard to Terminal
-                fprintf('\n     =================================================================================================================================\n');
-                fprintf('     TWIN SHEAR SCALING FACTOR SENSITIVITY LEADERBOARD - GRAIN %d (Ranked by Combined Error Index)\n', grainId);
-                fprintf('     =================================================================================================================================\n');
-                fprintf('     Rank | Scaling Factor | Combined Error Index | Correlation %% | Total Shear γ | Top Active Slip Systems \n');
-                fprintf('     ---------------------------------------------------------------------------------------------------------------------------------\n');
-                for r_i = 1:length(ranked_series)
-                    pr = ranked_series(r_i);
-                    fprintf('     #%02d  |     %5.2f      |       %.6f       |    %5.1f%%     |    %.4f     | %s \n', ...
-                            r_i, pr.factor_val, pr.penalized_res, pr.corr_rate, pr.total_gam, pr.top_sys);
-                end
-                fprintf('     =================================================================================================================================\n\n');
-                
-                % 2. Save CSV Table and MAT file
-                csv_path = fullfile(outDir, sprintf('%s_Grain%d_Var%d_ShearScaling_Leaderboard%s.csv', prefix, grainId, v, file_tag));
-                T_csv = table((1:length(ranked_series))', [ranked_series.factor_val]', ...
-                              [ranked_series.penalized_res]', [ranked_series.corr_rate]', [ranked_series.total_gam]', {ranked_series.top_sys}', ...
-                              'VariableNames', {'Rank', 'Shear_Scaling_Factor', 'Combined_Error_Index', 'Correlation_Rate_Pct', 'Total_Mean_Shear', 'Dominant_Slip_Systems'});
-                writetable(T_csv, csv_path);
-                save(fullfile(outDir, sprintf('%s_Grain%d_Var%d_ShearScaling_Data%s.mat', prefix, grainId, v, file_tag)), 'g_series', 'ranked_series', 'cfg', 'grainId', 'v');
-                
-                % 3. Generate 2-Axis Sensitivity Line Plot Figure with Free Scaling
-                fprintf('     -> Generating Shear Scaling Sensitivity Line Plot for Grain %d...\n', grainId);
-                figLine = figure('Name', 'Shear Scaling Sensitivity', 'Position', [200, 200, 950, 600], 'Visible', 'off');
-                
-                factors_arr = [g_series.factor_val];
-                res_arr     = [g_series.penalized_res];
-                corr_arr    = [g_series.corr_rate];
-                
-                yyaxis left
-                plot(factors_arr, res_arr, '-o', 'LineWidth', 2.5, 'MarkerSize', 8, 'MarkerFaceColor', 'b');
-                ylabel('Combined Error Index (r_{corr} / \eta_{corr})', 'FontSize', 12, 'FontWeight', 'bold');
-                grid on; hold on;
-                
-                % Let axes scale freely with generous visual headroom
-                min_y = min(res_arr); max_y = max(res_arr);
-                if max_y > min_y
-                    pad_y = (max_y - min_y) * 0.15;
-                    ylim([max(0, min_y - pad_y), max_y + pad_y]);
-                else
-                    axis auto;
-                end
-                
-                [min_r, min_idx] = min(res_arr);
-                plot(factors_arr(min_idx), min_r, 'r*', 'MarkerSize', 12, 'LineWidth', 2);
-                text(factors_arr(min_idx), min_r, sprintf('  Optimal Factor: %.2f (Index: %.6f)', factors_arr(min_idx), min_r), ...
-                     'Color', 'w', 'FontWeight', 'bold', 'BackgroundColor', 'k', 'FontSize', 10);
-                     
-                yyaxis right
-                plot(factors_arr, corr_arr, '--s', 'LineWidth', 2, 'MarkerSize', 8, 'MarkerFaceColor', [0.85 0.33 0.1]);
-                ylabel('Correlation Rate (%)', 'FontSize', 12, 'FontWeight', 'bold');
-                min_c = min(corr_arr); max_c = max(corr_arr);
-                if max_c > min_c
-                    pad_c = (max_c - min_c) * 0.15;
-                    ylim([max(0, min_c - pad_c), min(100, max_c + pad_c)]);
-                else
-                    axis auto;
-                end
-                
-                xlabel('Twinning Shear Scaling Factor', 'FontSize', 12, 'FontWeight', 'bold');
-                title(sprintf('SSLIP Quality Index & Correlation vs Shear Scaling Factor - Grain %d (Var %d)', grainId, v), 'FontSize', 14, 'FontWeight', 'bold');
-                legend({'Combined Error Index', 'Optimal Scaling Factor', 'Correlation Rate (%)'}, 'Location', 'best', 'FontSize', 11);
-                
-                lineplot_fname = sprintf('%s_Grain%d_Var%d_ShearScaling_Sensitivity%s.png', prefix, grainId, v, file_tag);
-                exportScaledFigure(figLine, fullfile(outDir, lineplot_fname), 'nodatestring');
-                close(figLine);
-                
-                % 4. Generate Interactive Markdown Report
-                md_path = fullfile(outDir, sprintf('%s_Grain%d_Var%d_ShearScaling_Report%s.md', prefix, grainId, v, file_tag));
-                fprintf('     -> Writing interactive Markdown Report with sensitivity curve and embedded maps to:\n        %s\n', md_path);
-                
-                fid = fopen(md_path, 'w');
-                fprintf(fid, '# Twinning Shear Scaling Parameter Series Report (Twin Decoupled SSLIP)\n\n');
-                fprintf(fid, '- **DIC Increment:** `%s`\n', prefix);
-                fprintf(fid, '- **Parent Grain ID:** `%d`\n', grainId);
-                fprintf(fid, '- **Twin Variant:** `%d`\n', v);
-                fprintf(fid, '- **Evaluated Scaling Factors:** `%s`\n\n', num2str(factors_arr));
-                
-                fprintf(fid, '## Shear Scaling Sensitivity Curve\n');
-                fprintf(fid, 'This line plot evaluates the **Combined Error Index** ($r_{\\text{comb}} = \\frac{\\text{mean correlated residual}}{\\text{correlation fraction}}$) alongside the pixel correlation rate. By normalizing the actual correlated residual against the explained map fraction, this metric avoids threshold flattening while sharply differentiating run quality across the parameter series.\n\n');
-                fprintf(fid, '![Shear Scaling Sensitivity Line Plot](%s)\n\n---\n\n', lineplot_fname);
-                
-                fprintf(fid, '## Shear Scaling Configuration Leaderboard\n');
-                fprintf(fid, 'Ranked by lowest Combined Error Index. All corresponding spatial activity maps are embedded below for visual confirmation.\n\n');
-                fprintf(fid, '| Rank | Scaling Factor | Combined Error Index | Correlation %% | Total $\\gamma$ | Dominant Active Systems |\n');
-                fprintf(fid, '| :---: | :---: | :---: | :---: | :---: | :--- |\n');
-                for r_i = 1:length(ranked_series)
-                    pr = ranked_series(r_i);
-                    fprintf(fid, '| **#%02d** | `%.2f` | `%.6f` | `%5.1f%%` | `%.4f` | %s |\n', ...
-                            r_i, pr.factor_val, pr.penalized_res, pr.corr_rate, pr.total_gam, pr.top_sys);
-                end
-                fprintf(fid, '\n---\n\n');
-                
-                fprintf(fid, '## Complete Visual Activity Maps Across All Evaluated Scaling Factors\n');
-                for r_i = 1:length(ranked_series)
-                    pr = ranked_series(r_i);
-                    b_name = pr.plotBaseName;
-                    
-                    fprintf(fid, '### Rank #%02d: Shear Scaling Factor = %.2f\n', r_i, pr.factor_val);
-                    fprintf(fid, '- **Combined Error Index:** `%.6f`\n', pr.penalized_res);
-                    fprintf(fid, '- **Correlation Rate:** `%.1f%%`\n', pr.corr_rate);
-                    fprintf(fid, '- **Total Mean Shear Activity:** `%.4f`\n', pr.total_gam);
-                    fprintf(fid, '- **Dominant Systems:** %s\n\n', pr.top_sys);
-                    
-                    fprintf(fid, '#### Slip System Activity Maps\n');
-                    fprintf(fid, '![Activity Maps %s](%s_SlipActivities.png)\n\n', b_name, b_name);
-                    
-                    fprintf(fid, '#### Residual Error Map\n');
-                    fprintf(fid, '![Residual Map %s](%s_Residual.png)\n\n', b_name, b_name);
-                    fprintf(fid, '---\n\n');
-                end
-                fclose(fid);
             end
         end
     end

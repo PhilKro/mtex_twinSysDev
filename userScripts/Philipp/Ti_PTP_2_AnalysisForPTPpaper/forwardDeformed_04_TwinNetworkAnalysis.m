@@ -47,14 +47,14 @@ for stepIdx = 1:numel(defSteps)
     
     % Attempt to load precomputed aligned EBSD object first
     matPath = fullfile(inDir, [defStep.stepName, '_deformedEBSD_withForwardDIC.mat']);
-    if exist(matPath, 'file')
+    if false %exist(matPath, 'file')
         fprintf('  -> Loading aligned EBSD dataset: %s...\n', matPath);
         dataLoaded = load(matPath);
         ebsd = dataLoaded.newEBSD;
         if isfield(dataLoaded, 'grains'), grains = dataLoaded.grains; end
     else
         fprintf('  -> Aligned MAT file not found. Loading TKD scan directly from .ang file...\n');
-        ang_path = fullfile(defaults.dir, defStep.tkd_fname, [defStep.tkd_fname, '.ang']);
+        ang_path = fullfile(defaults.dir, [defStep.tkd_fname, '.ang']);
         if ~exist(ang_path, 'file')
             warning('EBSD scan not found at:\n  %s\nSkipping Step [%s].', ang_path, defStep.stepName);
             continue;
@@ -62,33 +62,59 @@ for stepIdx = 1:numel(defSteps)
         CS = crystalSymmetry('6/mmm', [2.95 2.95 4.68], 'x||a', 'mineral', 'Ti');
         ebsd = EBSD.load(ang_path, CS, 'convertEuler2SpatialReferenceFrame', 'setting 2');
         ebsd = rotate(ebsd, rotation.byAxisAngle(xvector, -70*degree + defaults.tkd_tilt), 'keepXY');
-        ebsd(ebsd.ci < defaults.thresh_ci) = 'notIndexed';
-        ebsd = rotate(ebsd, rotation.byAxisAngle(zvector, 180*degree), 'keepXY');
         
+        ebsd = rotate(ebsd, rotation.byAxisAngle(zvector, 180*degree), 'keepXY');
+        ebsd.orientations = ebsd.orientations.project2FundamentalRegion(orientation.byEuler(defaults.refOrientationEulerAngles, ebsd.CS));
+
         mask_path = fullfile(defaults.dir, defStep.mask_fname);
+        ebsd = ebsd.gridify;
         if exist(mask_path, 'file')
             load(mask_path, 'specimenlocation');
             try, ebsd(~specimenlocation) = 'notIndexed'; catch, end
         end
-        ebsd = ebsd.gridify;
+        ebsd(ebsd.ci < defaults.thresh_ci) = 'notIndexed';
     end
     
     %% 3. Retrieve or Reconstruct Grains & Extract Boundaries
     grainThresh = 5*degree; 
-    minSize = 300; % Threshold in pixels to isolate significant grains
+    minSize = 10; % Threshold in pixels to isolate significant grains
     alpha = 1;
 
-    if ~isempty(grains) && isa(grains, 'grain2d')
+    if false %~isempty(grains) && isa(grains, 'grain2d')
         fprintf('  -> Successfully loaded precomputed grains directly from dataset.\n');
     else
         fprintf('  -> Calculating grains dynamically (thresh = %.1f deg, minSize = %d px)...\n', grainThresh/degree, minSize);
         ebsd(ebsd.ci < defaults.thresh_ci) = 'notIndexed';
         [grains, ebsd.grainId, ebsd.mis2mean] = calcGrains(ebsd, 'minPixel', minSize, 'angle', grainThresh, 'alpha', alpha);
+        grains = grains.smooth(4);
     end
     
     CS = ebsd.CS;
     gB = grains.boundary(CS.mineral, CS.mineral);
+
+    %% plot crystal shapes
+    grainipf = ipfColorKey(CS); 
+    grainipf.inversePoleFigureDirection = yvector;
+    grainColors = grainipf.orientation2color(grains.meanOrientation);
+
+    figGrainShapes = figure;
+    plot(grains,grainColors); hold on;
     
+    % create and plot crystal shapes
+    cShape = crystalShape.hex(CS);
+    plot(grains,0.5*cShape,'facecolor','r');
+   
+    % plot boundaries
+    plot(grains.boundary)
+    exportScaledFigure(figGrainShapes, fullfile(outDir, [defStep.stepName, '_Grains_crystalShapes.png']), 'nodatestring');
+    close(figGrainShapes);
+    %% 3b. Plot 0001 Pole Figure of Grain Orientations
+    figPF = figure;    
+    % Plot the 0001 pole figure (basal pole) for each grain
+    plotPDF(grains.meanOrientation, Miller(0,0,0,1,CS), ...
+        'property', grainColors, 'MarkerEdgeColor', 'k');
+    exportScaledFigure(figPF, fullfile(outDir, [defStep.stepName, '_Grains_0001_PF.png']), 'nodatestring');
+    close(figPF);  
     %% 4. Define Twin System & Initialize TwinNetwork2
     fprintf('  -> Initializing {10-12} tensile twin system and TwinNetwork2 engine...\n');
     tS_1012 = twinSystem.hexagonal_1012(CS);
@@ -130,7 +156,7 @@ for stepIdx = 1:numel(defSteps)
     
     disp('    Step 5: Reducing to Quotient Graph...');
     Q = network.reduceToQuotient(mstG);
-    network.plotGraph(Q);
+    network.plotGraph(Q,'noGrainsBG', true);
     figQ = gcf;
     title(sprintf('[%s] Step 5: Final Quotient Graph', defStep.stepName), 'Interpreter', 'none');
     exportScaledFigure(figQ, fullfile(outDir, [defStep.stepName, '_05_Quotient_Graph.png']), 'nodatestring');
@@ -141,6 +167,13 @@ for stepIdx = 1:numel(defSteps)
     figGen = gcf;
     title(sprintf('[%s] Step 6: Twin Generations & Network Map', defStep.stepName), 'Interpreter', 'none');
     exportScaledFigure(figGen, fullfile(outDir, [defStep.stepName, '_06_Twin_Generations.png']), 'nodatestring');
+    close(figGen);
+
+    disp('    Step 6.5: Plotting grains with twin generation assignment with no text...');
+    network.plot('twinsOnly', false, 'noText', true, 'lineWidth', 2);
+    figGen = gcf;
+    title(sprintf('[%s] Step 6: Twin Generations & Network Map', defStep.stepName), 'Interpreter', 'none');
+    exportScaledFigure(figGen, fullfile(outDir, [defStep.stepName, '_06b_Twin_Generations_Nice.png']), 'nodatestring');
     close(figGen);
     
     % Save summary MAT file for this step

@@ -62,7 +62,7 @@ for i = 1:length(matFiles)
     % Re-run plotting directly
     fprintf('   -> Generating plots with updated color scaling...\n');
     tic;
-    plotSSLIP(data.ebsdID.prop.slipIDcor, data.ebsdID.prop.residualEeff, data.ebsdID, data.sSLocal_filt, optOut);
+    plotSSLIP(data.ebsdID, data.sSLocal_filt, optOut);
     fprintf('   -> Complete in %.2f seconds!\n', toc);
 end
 

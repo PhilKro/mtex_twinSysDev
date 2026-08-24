@@ -15,8 +15,8 @@ plottingConvention.default.east = xvector;
 plottingConvention.default.outOfScreen = -zvector;
 
 %% Load Master Configuration & Dataset Registry
-% [registry, defaults] = a00_Dataset_Registry();
-[registry, defaults] = a00_Dataset_Registry_DifferentialDIC();
+[registry, defaults] = a00_Dataset_Registry();
+% [registry, defaults] = a00_Dataset_Registry_DifferentialDIC();
 
 % Filter for deformed state entries that have a valid associated TKD dataset and are not excluded
 defSteps = registry(~[registry.isReference] & ~[registry.exclude] & ~cellfun(@isempty, {registry.tkd_fname}));
@@ -258,7 +258,7 @@ for stepIdx = 1:numel(defSteps)
         u_dic_raw = double(h5read(dicFilePath, uxPath));
         v_dic_raw = double(h5read(dicFilePath, uyPath));
     catch ME
-        warning('Could not read core DaVis coordinates/displacements. Skipping DIC import. (%s)', ME.message);
+        warning(Me.identifier, 'Could not read core DaVis coordinates/displacements. Skipping DIC import. (%s)', ME.message);
         continue;
     end
     

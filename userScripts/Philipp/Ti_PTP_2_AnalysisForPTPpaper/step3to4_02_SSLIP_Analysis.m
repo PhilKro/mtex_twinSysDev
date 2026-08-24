@@ -8,7 +8,7 @@
 clear; close all; clc;
 
 addpath('c:\Users\phkr\MTEX_workEnv\userScripts\HelperFunctions');
-addpath('c:\Users\phkr\MTEX_workEnv\userScripts\SSLIP\src');
+addpath('c:\Users\phkr\MTEX_workEnv\userScripts\SSLIP'); initSSLIP();
 
 plotx2east;
 plotzIntoPlane;
@@ -257,31 +257,27 @@ for i_i = 1:length(prefix_list)
         
         plotBaseName = sprintf('%s_Grain%d_%s', prefix, grainId, cfg.slip_system_mode);
         
-        IDoptions.IDMethod    = cfg.sslip_method;
-        IDoptions.filterSize  = 4;
-        IDoptions.coarsegrain = 4;
-        IDoptions.threshResidual = cfg.threshResidual;
+        % Configure New SSLIP Architecture Parameters
+        ssl_cfg = struct();
+        ssl_cfg.preprocess = struct();
+        ssl_cfg.preprocess.filterSize  = 4;
+        ssl_cfg.preprocess.coarsegrain = 4;
+        
+        ssl_cfg.solver = struct();
+        ssl_cfg.solver.IDMethod       = cfg.sslip_method;
+        ssl_cfg.solver.threshResidual = cfg.threshResidual;
         if isfield(cfg, 'threshResidualFraction')
-            IDoptions.threshResidualFraction = cfg.threshResidualFraction;
+            ssl_cfg.solver.threshResidualFraction = cfg.threshResidualFraction;
         end
-        IDoptions.minEeff     = cfg.minEeff;
-        IDoptions.posConstr   = cfg.posConstr;
-        IDoptions.plotSSLIP   = 0; % Disable automatic slow figure saving
-        IDoptions.layout      = [];
-        IDoptions.plotTraces  = 1;
-        IDoptions.stress      = stressState;
-        IDoptions.casename    = plotBaseName;
-        IDoptions.plotDefGrad = 1;
-        IDoptions.saveFig     = 0; % Avoid heavy PNG generation; export lightweight JPGs manually
-        IDoptions.plotname    = fullfile(outDir, plotBaseName);
-        IDoptions.sizeAdjust  = 0.5;
-        IDoptions.plotResidual = 1;
-        IDoptions.logscale    = cfg.logscale;
-
-        IDoptions.Hxx = ebsd_grain.prop.B00001_Gradients_du_dx_RC;
-        IDoptions.Hxy = ebsd_grain.prop.B00001_Gradients_du_dy_RC;
-        IDoptions.Hyx = ebsd_grain.prop.B00001_Gradients_dv_dx_RC;
-        IDoptions.Hyy = ebsd_grain.prop.B00001_Gradients_dv_dy_RC;
+        ssl_cfg.solver.posConstr      = cfg.posConstr;
+        ssl_cfg.solver.enableRotation = cfg.enableRotation;
+        
+        % Setup DeformationData contract
+        DefData = struct();
+        DefData.Hxx = ebsd_grain.prop.B00001_Gradients_du_dx_RC;
+        DefData.Hxy = ebsd_grain.prop.B00001_Gradients_du_dy_RC;
+        DefData.Hyx = ebsd_grain.prop.B00001_Gradients_dv_dx_RC;
+        DefData.Hyy = ebsd_grain.prop.B00001_Gradients_dv_dy_RC;
 
         if cfg.logscale
             IDoptions.logmin      = 0.01;
@@ -302,11 +298,18 @@ for i_i = 1:length(prefix_list)
                 m_res        = cached_data.m_res;
                 corr_rate    = cached_data.corr_rate;
             else
-                fprintf('   Running SSLIP optimization (%d systems)...\n', length(sS_filt));
-                [ebsdID, optOut] = SSLIP(ebsd_grain, U, V, sSLocal_filt, IDoptions);
+                fprintf('   [Solver] Initiating SSLIP optimization for %d valid systems...\n', length(sSLocal_filt));
+                [ebsdID, prepData, optOut] = SSLIP(ebsd_grain, DefData, sSLocal_filt, ssl_cfg);
                 
-                % Save deformation gradient summary figure produced by SSLIP
-                if IDoptions.plotDefGrad
+                % optOut is returned for plotting backward compatibility
+                optOut.plotname = fullfile(outDir, plotBaseName);
+                optOut.stress = stressState;
+                optOut.clim_percentile = cfg.clim_percentile;
+                optOut.posConstr = cfg.posConstr;
+                
+                % Save deformation gradient summary figure
+                if isfield(cfg, 'plotDefGrad') && cfg.plotDefGrad
+                    plotSSLIP_DeformationFields(ebsdID, optOut);
                     defGrad_fig = gcf;
                     exportScaledFigure(defGrad_fig, fullfile(outDir, [plotBaseName, '_DefGrad.jpg']), 'target_px', cfg.jpg_target_px, 'dpi', cfg.jpg_dpi, 'nodatestring');
                     close(defGrad_fig);
@@ -338,7 +341,7 @@ for i_i = 1:length(prefix_list)
             end
             
             % Identify top active slip systems
-            mean_acts = mean(ebsdID.prop.slipIDcor, 2, 'omitnan');
+            mean_acts = mean(ebsdID.prop.slipIDcor, 1, 'omitnan');
             [sort_acts, sort_idx] = sort(mean_acts, 'descend');
             
             top_str = '';
@@ -377,7 +380,7 @@ for i_i = 1:length(prefix_list)
             % Generate and export lightweight JPG Figures
             close all;
             optOut.saveFig = 0;
-            plotSSLIP(ebsdID.prop.slipIDcor, ebsdID.prop.residualEeff, ebsdID, sSLocal_filt, optOut);
+            plotSSLIP(ebsdID, sSLocal_filt, optOut);
             
             figs = findall(0, 'Type', 'figure');
             [~, s_idx_f] = sort([figs.Number]);

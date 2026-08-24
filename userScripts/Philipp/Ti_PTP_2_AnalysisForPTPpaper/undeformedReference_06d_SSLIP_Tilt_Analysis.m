@@ -302,7 +302,7 @@ for inc_idx = inc_indices
                 % 6. Manually trigger plotSSLIP and save crisp lightweight JPGs
                 close all;
                 optOut.saveFig = 0;
-                plotSSLIP(ebsdID.prop.slipIDcor, ebsdID.prop.residualEeff, ebsdID, sSLocal_filt, optOut);
+                plotSSLIP(ebsdID, sSLocal_filt, optOut);
                 
                 figs = findall(0, 'Type', 'figure');
                 [~, s_idx_f] = sort([figs.Number]);

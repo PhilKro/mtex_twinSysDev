@@ -23,7 +23,7 @@ clear; close all; clc;
 
 addpath('c:\Users\phkr\MTEX_workEnv\userScripts\HelperFunctions');
 addpath('c:\Users\phkr\MTEX_workEnv\geometry');
-addpath('c:\Users\phkr\MTEX_workEnv\userScripts\SSLIP\src');
+addpath('c:\Users\phkr\MTEX_workEnv\userScripts\SSLIP'); initSSLIP();
 
 plotx2east;
 plotzIntoPlane;
@@ -281,8 +281,8 @@ for inc_idx = inc_indices
                             mean_res = r_corr / max(1e-3, corr_frac);
                             
                             act_map  = ebsdID_out.prop.slipIDcor;
-                            mean_act1 = mean(act_map(1, ~isnan(act_map(1,:))), 'all', 'omitnan');
-                            mean_act2 = mean(act_map(2, ~isnan(act_map(2,:))), 'all', 'omitnan');
+                            mean_act1 = mean(act_map(:, 1), 'omitnan');
+                            mean_act2 = mean(act_map(:, 2), 'omitnan');
                         catch ME
                             mean_res = NaN; corr_rate = 0; mean_act1 = NaN; mean_act2 = NaN; ebsdID_out = []; optOut = [];
                         end
@@ -349,7 +349,7 @@ for inc_idx = inc_indices
                     
                     close all;
                     % Re-trigger plotSSLIP directly on precomputed fields
-                    plotSSLIP(win_pr.ebsdID.prop.slipIDcor, win_pr.ebsdID.prop.residualEeff, win_pr.ebsdID, win_pr.sS_pair, win_opt);
+                    plotSSLIP(win_pr.ebsdID, win_pr.sS_pair, win_opt);
                     
                     % Export all open figures instantly as lightweight JPGs via exportScaledFigure
                     figs = findall(0, 'Type', 'figure');

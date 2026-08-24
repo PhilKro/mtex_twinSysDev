@@ -40,8 +40,8 @@ end
 
 %% 1. Resolve Input Output Directories & Scan Deformed MAT Archives
 try
-    % [~, defaults] = a00_Dataset_Registry();
-    [~, defaults] = a00_Dataset_Registry_DifferentialDIC();
+    [~, defaults] = a00_Dataset_Registry();
+    % [~, defaults] = a00_Dataset_Registry_DifferentialDIC();
     baseDir = defaults.dir;
     inputDir = fullfile(baseDir, defaults.outDir_deformed);
 catch
@@ -140,6 +140,8 @@ for idx_step = 1:length(sel_indices)
     % Extract or evaluate grain topology
     if isfield(cData, 'grains') && ~isempty(cData.grains)
         grains = cData.grains;
+        warning('Pre-computed grains are smoothed')
+        grains = grains.smooth(5);
     else
         fprintf('  -> Calculating grain boundary topology on-the-fly (>300 px, 5°)...\n');
         [grains, ~] = calcGrains(ebsd_grid, 'minPixel', 300, 'angle', 5*degree);

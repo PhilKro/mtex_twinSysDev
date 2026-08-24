@@ -84,8 +84,6 @@ for i_i = 1:length(prefix_list)
     fprintf('------------------------------------------------------------------------\n');
     
     for g_i = 1:length(grains_ids)
-        clear IDoptions
-        close all
         grainId = grains_ids(g_i);
         
         fprintf('   [Grain %d (%d px)] Initializing slip geometry...\n', grainId, grains(grainId).numPixel);
@@ -125,36 +123,48 @@ for i_i = 1:length(prefix_list)
         
         plotBaseName = sprintf('%s_SSLIP_Grain%d', prefix, grainId);
         
-        IDoptions.IDMethod = 1;
-        IDoptions.filterSize = 4;
-        IDoptions.coarsegrain = 4;
-        IDoptions.threshResidual = 0.02;
-        IDoptions.minEeff = 0.01;
-        IDoptions.posConstr = 1;
-        IDoptions.plotSSLIP = 1;
-        IDoptions.layout = [];
-        IDoptions.plotTraces = 1;
-        IDoptions.stress = stressState;
-        IDoptions.casename = plotBaseName;
-        IDoptions.plotDefGrad = 1;
-        IDoptions.saveFig = 1;
-        IDoptions.plotname = fullfile(outDir, plotBaseName);
-        IDoptions.sizeAdjust = 0.5;
-        IDoptions.plotResidual = 1;
-        IDoptions.logscale = 1;
-        IDoptions.logmin = 0.01;
-        try, IDoptions.cmap = viridis(512); catch, IDoptions.cmap = parula(256); end
-        IDoptions.comment = sprintf('RefGrain_%d_Inc_%s', grainId, prefix);
-        IDoptions.NoSs = 1:length(sS_filt);
+        clear cfg
+        close all
         
-        fprintf('   Running SSLIP optimization...\n');
+        % -------------------------------------------------------------
+        % Configure SSLIP run (Modern Architecture)
+        % -------------------------------------------------------------
+        cfg = struct();
+        cfg.preprocessor.filterSize = 4;
+        cfg.preprocessor.coarsegrain = 4;
+        
+        cfg.solver.IDMethod = 1; % Combined ID
+        cfg.solver.threshResidual = 0.02;
+        cfg.solver.minEeff = 0.01;
+        cfg.solver.posConstr = 1; 
+        cfg.solver.NoSs = 1:length(sS_filt);
+        
+
+        
+        cfg.plot.stress = stressState;
+        cfg.plot.casename = plotBaseName;
+        cfg.plot.plotDefGrad = 1;
+        cfg.plot.saveFig = 1;
+        cfg.plot.plotname = fullfile(outDir, plotBaseName);
+        cfg.plot.sizeAdjust = 0.5;
+        cfg.plot.plotResidual = 1;
+        cfg.plot.logscale = 1;
+        cfg.plot.logmin = 0.01;
+        try, cfg.plot.cmap = viridis(512); catch, cfg.plot.cmap = parula(256); end
+        cfg.plot.comment = sprintf('RefGrain_%d_Inc_%s', grainId, prefix);
+        cfg.plot.plotTraces = 1;
+        
+        fprintf('   Running SSLIP optimization (Vectorized)...\n');
         try
-            [ebsdID, optOut] = SSLIP(ebsd_grain, U, V, sSLocal_filt, IDoptions);
+            [ebsdID, optOut] = SSLIP(ebsd_grain, U, V, sSLocal_filt, cfg);
+            
+            % External plotting decoupling
+            plotSSLIP(ebsdID, sSLocal_filt, optOut);
             
             resMatPath = fullfile(outDir, [plotBaseName, '_SSLIP_results.mat']);
             save(resMatPath, 'ebsdID', 'sSLocal_filt', 'optOut', 'grainId');
             
-            SF = abs(SchmidFactor(sSLocal_filt, IDoptions.stress));
+            SF = abs(SchmidFactor(sSLocal_filt, cfg.plot.stress));
             SF = round(SF*1000)/1000;
             
             T = table((1:length(sS_filt))', arrayfun(@(x) x.b.char, sS_filt, 'UniformOutput', false), ...

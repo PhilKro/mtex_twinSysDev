@@ -1056,13 +1056,11 @@ function onGbChange(fig)
     
     idx = get(app.ui.pu_gb, 'Value'); styles = get(app.ui.pu_gb, 'String'); sel_style = styles{idx};
     
-    % Robustly purge ALL grain boundary line, patch, and graphic overlay objects from axes
-    all_children = get(app.ax, 'Children');
-    if ~isempty(all_children)
-        types = get(all_children, 'Type');
-        if ischar(types), types = {types}; end
-        non_image_idx = ~strcmpi(types, 'image') & ~strcmpi(types, 'text');
-        delete(all_children(non_image_idx));
+    % Purge PREVIOUS grain boundary objects from axes without destroying the MTEX micronBar
+    if isfield(app, 'hBoundaries') && ~isempty(app.hBoundaries)
+        for i_hb = 1:length(app.hBoundaries)
+            try if isvalid(app.hBoundaries(i_hb)), delete(app.hBoundaries(i_hb)); end; catch, end
+        end
     end
     app.hBoundaries = [];
     

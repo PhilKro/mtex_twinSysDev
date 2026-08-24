@@ -1,47 +1,46 @@
-function [h, err] = round(h,varargin)
+function [h,err] = round(h,varargin)
 % tries to round miller indizes to greatest common divisor
 %
 % Syntax
 %   h = round(h)
 %   h = round(h,'maxHKL',5)
-%   h = round(h,'round3Index')
-%   [h, err] = round(...)
+%   h = round(h,'uvw')
+%   [h,err] = round(h)
 %
 % Input
 %  h - @Miller
 %
 % Output
 %  h - @Miller
-%  err - angle between original and rounded Miller vector
+%  err - angle between the original and the rounded Miller indices
 %
 % Options
 %  maxHKL - maximum value of Miller indices
-%  round3Index - flag to force rounding the 3 index notation for Tri/Hex lattices
+%  hkl, hkil, uvw, UVTW - convention to round with respect to, by default
+%    the display convention of h is used
+%
+% Description
+% For trigonal and hexagonal lattices the three and the four index notation
+% are not integer at the same time, e.g. UVTW = (1,3,-4,8) corresponds to
+% uvw = (5,7,8)/3. Which of them is rounded is decided by the convention
+% option.
 %
 
 % ignore xyz case
-if h.dispStyle == MillerConvention.xyz, err = 0; return; end
+if h.dispStyle == MillerConvention.xyz, err = zeros(size(h)); return; end
 
-h_old = h;
+hOld = h;
 sh = size(h);
 
-% check if we should force 3 index rounding for Tri/Hex
-round3Index = check_option(varargin, 'round3Index') && h.lattice.isTriHex;
+% round with respect to the convention given as an option - remember the
+% display convention as setting the coordinates below overwrites it
+dispStyle = h.dispStyle;
+h.dispStyle = get_flag(varargin,{'hkl','hkil','uvw','UVTW'},dispStyle);
 
-isDirection = any(strcmpi(char(h(1).dispStyle), {'uvw','UVTW'}));
+mOld = h.coordinates;
 
-if round3Index
-  if isDirection
-      mOld = h.uvw;
-  else
-      mOld = h.hkl;
-  end
-  mOld = mOld';
-else
-  mOld = h.coordinates;
-  % consider only 3 digits Miller indices
-  mOld = mOld(:,[1 2 end])';
-end
+% consider only 3 digits Miller indices
+mOld = mOld(:,[1 2 end])';
 
 % the 
 mMax = reshape(max(abs(mOld),[],1),size(h));
@@ -64,23 +63,14 @@ end
 
 h = h .* multiplier;
 
-currentDispStyle = h.dispStyle;
-
 % now round
-if round3Index
-  if isDirection
-      h.uvw = round(h.uvw);
-  else
-      h.hkl = round(h.hkl);
-  end
-else
-  h.coordinates = round(h.coordinates);
-end
+h.coordinates = round(h.coordinates);
 
-h.dispStyle = currentDispStyle;
+% restore the display convention
+h.dispStyle = dispStyle;
 
 h = reshape(h,sh);
 
-if nargout == 2
-    err = angle(h_old, h);
-end
+% the deviation caused by rounding - with respect to the rounded indices
+% themselves, hence ignoring symmetrically equivalent directions
+if nargout == 2, err = angle(hOld,h,'noSymmetry'); end

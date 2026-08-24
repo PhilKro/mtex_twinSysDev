@@ -117,8 +117,6 @@ for i=1:length(t2t)
 end
 
 %% calc and plot twinBounds
-
-
 % take only boundaries between Ti grains
 gB = grains.boundary('Ti','Ti');
 
@@ -149,20 +147,6 @@ end
 
 
 saveFigure([fname,'full_twinBound.png'])
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 %% plot misorientations ( see here: https://mtex-toolbox.github.io/TwinningBoundaries.html )
 

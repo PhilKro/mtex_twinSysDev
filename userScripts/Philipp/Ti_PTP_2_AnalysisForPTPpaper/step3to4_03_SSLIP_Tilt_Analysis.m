@@ -223,27 +223,25 @@ for i_i = 1:length(prefix_list)
             case_name = sprintf('%s_Grain%02d_Run%02d_%s', prefix, grainId, run_i, clean_tag);
             
             clear IDoptions;
-            IDoptions.IDMethod    = cfg.sslip_method;
-            IDoptions.filterSize  = 4;
-            IDoptions.coarsegrain = 4;
-            IDoptions.threshResidual = cfg.threshResidual;
-            IDoptions.minEeff     = cfg.minEeff;
-            IDoptions.posConstr   = cfg.posConstr;
-            IDoptions.plotSSLIP   = 0;
-            IDoptions.layout      = [];
-            IDoptions.plotTraces  = 1;
-            IDoptions.stress      = stressState;
-            IDoptions.casename    = case_name;
-            IDoptions.plotDefGrad = 1;
-            IDoptions.saveFig     = 0;
-            IDoptions.plotname    = fullfile(outDir, case_name);
-            IDoptions.sizeAdjust  = 0.5;
-            IDoptions.plotResidual = 1;
-            IDoptions.logscale    = 1;
-            IDoptions.logmin      = 0.01;
-            try, IDoptions.cmap = viridis(512); catch, IDoptions.cmap = parula(256); end
-            IDoptions.comment     = sprintf('Grain %d [%s | %s]', grainId, cfg.slip_system_mode, tag_str);
-            IDoptions.NoSs        = 1:length(sS_filt);
+            % Configure New SSLIP Architecture Parameters
+            ssl_cfg = struct();
+            ssl_cfg.preprocess = struct();
+            ssl_cfg.preprocess.filterSize  = 4;
+            ssl_cfg.preprocess.coarsegrain = 4;
+            
+            ssl_cfg.solver = struct();
+            ssl_cfg.solver.IDMethod       = cfg.sslip_method;
+            ssl_cfg.solver.threshResidual = cfg.threshResidual;
+            if isfield(cfg, 'threshResidualFraction')
+                ssl_cfg.solver.threshResidualFraction = cfg.threshResidualFraction;
+            end
+            ssl_cfg.solver.posConstr      = cfg.posConstr;
+            ssl_cfg.solver.enableRotation = cfg.enableRotation;
+            
+            % Setup DeformationData contract
+            DefData = struct();
+            DefData.U = U;
+            DefData.V = V;
             
             resMatPath = fullfile(outDir, [case_name, '_SSLIP_results.mat']);
             
@@ -258,9 +256,16 @@ for i_i = 1:length(prefix_list)
                     corr_rate    = cached_data.corr_rate;
                 else
                     fprintf('      Running multi-slip optimization (%d systems)...\n', length(sS_filt));
-                    [ebsdID, optOut] = SSLIP(ebsd_grain, U, V, sSLocal_filt, IDoptions);
+                    [ebsdID, prepData, optOut] = SSLIP(ebsd_grain, DefData, sSLocal_filt, ssl_cfg);
                     
-                    if IDoptions.plotDefGrad
+                    % optOut is returned for plotting backward compatibility
+                    optOut.plotname = fullfile(outDir, case_name);
+                    optOut.stress = stressState;
+                    optOut.clim_percentile = cfg.clim_percentile;
+                    optOut.posConstr = cfg.posConstr;
+                    
+                    if isfield(cfg, 'plotDefGrad') && cfg.plotDefGrad
+                        plotSSLIP_DeformationFields(ebsdID, optOut);
                         defGrad_fig = gcf;
                         exportScaledFigure(defGrad_fig, fullfile(outDir, [case_name, '_DefGrad.jpg']), 'target_px', cfg.jpg_target_px, 'dpi', cfg.jpg_dpi, 'nodatestring');
                         close(defGrad_fig);
@@ -290,7 +295,7 @@ for i_i = 1:length(prefix_list)
                 end
                 
                 % Identify top active slip systems
-                mean_acts = mean(ebsdID.prop.slipIDcor, 2, 'omitnan');
+                mean_acts = mean(ebsdID.prop.slipIDcor, 1, 'omitnan');
                 [sort_acts, sort_idx] = sort(mean_acts, 'descend');
                 
                 top_str = '';
@@ -329,7 +334,7 @@ for i_i = 1:length(prefix_list)
                 % Generate and export lightweight JPG Figures
                 close all;
                 optOut.saveFig = 0;
-                plotSSLIP(ebsdID.prop.slipIDcor, ebsdID.prop.residualEeff, ebsdID, sSLocal_filt, optOut);
+                plotSSLIP(ebsdID, sSLocal_filt, optOut);
                 
                 figs = findall(0, 'Type', 'figure');
                 [~, s_idx_f] = sort([figs.Number]);

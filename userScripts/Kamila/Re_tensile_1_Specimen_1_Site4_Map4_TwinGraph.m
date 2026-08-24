@@ -16,6 +16,13 @@ file = 'Re tensile 1 Specimen 1 Site 4 Map Data 4_Map_Data_4_BW203.ang';
 
 path = fullfile(dir, file);
 
+% Create analysis directory
+analysis_dir = fullfile(dir, 'analysis');
+if ~exist(analysis_dir, 'dir')
+    mkdir(analysis_dir);
+end
+
+
 % define tilt, only for TKD
 tkd_tilt = 70 * degree;
 
@@ -128,6 +135,12 @@ ebsd_filled = fill(ebsd, grains);
 figure; plot(ebsd,ebsd.orientations); nextAxis; plot(ebsd_filled, ebsd_filled.orientations); 
 
 %% close all
+
+% Save existing figures before closing
+figHandles = findobj('Type', 'figure');
+for i = 1:length(figHandles)
+    saveas(figHandles(i), fullfile(analysis_dir, sprintf('Figure_part1_%d.jpg', figHandles(i).Number)));
+end
 close all
 figure;
 plot(grains,colors)
@@ -139,7 +152,7 @@ text(grains,grains.id)
 %% Graph-Based Twin Analysis (11-21 Twins)
 
 % --- Settings ---
-% maxGenerationLimit = 2; % Enforces how deep the twinning can go (not in TwinNetwork2 just yet)
+% maxGenerationLimit = 2; % Enforces how deep the twinning can go (not in TwinNetwork just yet)
 
 % 1. Define the 11-21 twin system
 tS_1121 = twinSystem.hexagonal_1121(CS);
@@ -147,7 +160,7 @@ tS_1121 = twinSystem.hexagonal_1121(CS);
 % 2. Initialize the TwinNetwork
 % This class neatly encapsulates the graph-theoretical topology extraction,
 % multi-region decomposition, and exact reference frame propagation.
-network = TwinNetwork2(grains, gB, tS_1121, ebsd, ...
+network = TwinNetwork(grains, gB, tS_1121, ebsd, ...
     'thresh', 8*degree);
 
 % 3. Execute the topological pipeline step-by-step
@@ -182,3 +195,22 @@ network.plot('twinsOnly', false);
 title('Step 6: Twin generations');
 
 % network.plotSigmaSections(mstG);
+
+
+% Save remaining figures
+figHandles = findobj('Type', 'figure');
+for i = 1:length(figHandles)
+    % Try to get figure title for meaningful name, fallback to number
+    ax = get(figHandles(i), 'CurrentAxes');
+    figName = sprintf('Figure_part2_%d', figHandles(i).Number);
+    if ~isempty(ax)
+        t = get(ax, 'Title');
+        if ~isempty(t) && ~isempty(t.String)
+            cleanTitle = strrep(t.String, ' ', '_');
+            cleanTitle = strrep(cleanTitle, ':', '');
+            figName = cleanTitle;
+        end
+    end
+    saveas(figHandles(i), fullfile(analysis_dir, [figName '.jpg']));
+    %saveas(figHandles(i), fullfile(analysis_dir, [figName '.fig'])); % Optional: save as fig too
+end
