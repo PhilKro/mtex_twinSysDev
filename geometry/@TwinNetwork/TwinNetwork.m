@@ -441,8 +441,8 @@ classdef TwinNetwork < handle
                     'VariableNames', {'EndNodes', 'Sequence', 'AngularDeviation', 'Variant', 'MeanEbsdOri1', 'MeanEbsdOri2'});
                 mstG = graph(mstEdgeT,G.Nodes);
             else
-                emptyEdges = table(zeros(0,2),'VariableNames',{'EndNodes'});
-                mstG = graph(emptyEdges,G.Nodes);
+                mstG = graph();
+                mstG = addnode(mstG, G.Nodes);
             end
         end
 
@@ -653,7 +653,7 @@ classdef TwinNetwork < handle
             addParameter(p, 'debug', false);
             addParameter(p, 'outlierMode', 'empirical', @(x) any(validatestring(x, {'empirical', 'theoretical'})));
             addParameter(p, 'maxErrThreshold', 15 * degree);
-            addParameter(p, 'rejectGenIncrease', false, @islogical);
+            addParameter(p, 'rejectGenIncrease', true, @islogical);
             parse(p, varargin{:});
             target_node_override = p.Results.targetNode;
             debug_mode = p.Results.debug;
@@ -1597,7 +1597,137 @@ classdef TwinNetwork < handle
                 labeledge(pPlot, 1:numedges(G), labels);
             end
 
-            hold off;
+        end
+        
+        function [grain_SF, grain_IW] = analyzeMechanics(obj, sigma, varargin)
+            % ANALYZEMECHANICS Evaluates Schmid Factor and Interaction Work for twin generations
+            %
+            % Syntax:
+            %   [grain_SF, grain_IW] = obj.analyzeMechanics(sigma)
+            %   [grain_SF, grain_IW] = obj.analyzeMechanics(sigma, 'relative')
+            %
+            % Input:
+            %   sigma - stressTensor (in specimen coordinates)
+            %   'relative' - flag to compute SF relative to CRSS
+            %
+            % Output:
+            %   grain_SF - (n x 1) array mapping the Schmid factor directly to obj.grains
+            %   grain_IW - (n x 1) array mapping the Interaction Work directly to obj.grains
+            
+            Q = obj.QuotientGraph;
+            if isempty(Q) || numnodes(Q) == 0
+                error('twinNetwork:QuotientGraphMissing', 'Quotient Graph is empty. Please run step 5 (reduceToQuotient) first.');
+            end
+            
+            % Initialize properties on the Quotient nodes if not already present
+            numQ = numnodes(Q);
+            qSF = nan(numQ, 1);
+            qIW = nan(numQ, 1);
+            
+            % Symmetrize the twin system to access individual variants
+            tS_sym = obj.tS.symmetrise;
+            
+            % Perform a BFS tree traversal starting from the roots
+            % In an undirected quotient graph, roots have an empty VariantPath
+            isRoot = cellfun(@isempty, Q.Nodes.VariantPath);
+            queue = find(isRoot);
+            queue = queue(:)'; % Row vector for queue
+            
+            visited = false(numQ, 1);
+            visited(queue) = true;
+            
+            while ~isempty(queue)
+                curr_node = queue(1);
+                queue(1) = [];
+                
+                % Use robustMeanOrientation if present, fallback to MeanOrientation
+                if ismember('robustMeanOrientation', Q.Nodes.Properties.VariableNames)
+                    currOri = Q.Nodes.robustMeanOrientation(curr_node);
+                else
+                    currOri = Q.Nodes.MeanOrientation(curr_node);
+                end
+                
+                % Get incident edges for the current node (outedges returns all incident edges for undirected graphs)
+                edge_idxs = outedges(Q, curr_node);
+                
+                for i = 1:length(edge_idxs)
+                    edge_idx = edge_idxs(i);
+                    s = Q.Edges.EndNodes(edge_idx, 1);
+                    t = Q.Edges.EndNodes(edge_idx, 2);
+                    
+                    % Identify which node is the child
+                    if s == curr_node
+                        child_node = t;
+                    else
+                        child_node = s;
+                    end
+                    
+                    if ~visited(child_node)
+                        visited(child_node) = true;
+                        
+                        variant_idx = Q.Edges.Variant(edge_idx);
+                        
+                        % We only calculate if the parent has a valid orientation
+                        if ~isnan(currOri) && variant_idx > 0 && variant_idx <= obj.numVariants
+                            % Calculate Schmid Factor
+                            sf_val = SchmidFactor(tS_sym(variant_idx), sigma, currOri, varargin{:});
+                            % Calculate Interaction Work
+                            iw_val = interactionWork(tS_sym(variant_idx), sigma, currOri, varargin{:});
+                            
+                            % Store in child node (the twin generation)
+                            qSF(child_node) = max(sf_val);
+                            qIW(child_node) = max(iw_val);
+                        end
+                        
+                        queue(end+1) = child_node;
+                    end
+                end
+            end
+            
+            % Attach the calculated values permanently to the QuotientGraph Nodes table
+            obj.QuotientGraph.Nodes.SchmidFactor = qSF;
+            obj.QuotientGraph.Nodes.InteractionWork = qIW;
+            
+            % Now map these values back to the individual physical grains
+            numGrains = length(obj.grains);
+            grain_SF = nan(numGrains, 1);
+            grain_IW = nan(numGrains, 1);
+            
+            % Create an inverse mapping from physical ID to grain linear index (1 to numGrains)
+            id2idx = zeros(max(obj.grains.id), 1);
+            id2idx(obj.grains.id) = 1:numGrains;
+            
+            % For each mapped physical node, look up the quotient node's SF/IW
+            max_phys_id = max(obj.grains.id);
+            for phys_id = 1:min(length(obj.nodeGroups), max_phys_id)
+                idx = id2idx(phys_id);
+                if idx > 0
+                    q_group = obj.nodeGroups(phys_id);
+                    if q_group > 0
+                        grain_SF(idx) = qSF(q_group);
+                        grain_IW(idx) = qIW(q_group);
+                    end
+                end
+            end
+            
+            % Also store on the raw Graph for consistency (aligning with its nodes)
+            gSF = nan(numnodes(obj.Graph), 1);
+            gIW = nan(numnodes(obj.Graph), 1);
+            % obj.Graph nodes correspond directly to physical grains by GrainId
+            if ismember('GrainId', obj.Graph.Nodes.Properties.VariableNames)
+                for i = 1:numnodes(obj.Graph)
+                    gid = obj.Graph.Nodes.GrainId(i);
+                    if ~isnan(gid) && gid > 0 && gid <= length(obj.nodeGroups)
+                        q_grp = obj.nodeGroups(gid);
+                        if q_grp > 0
+                            gSF(i) = qSF(q_grp);
+                            gIW(i) = qIW(q_grp);
+                        end
+                    end
+                end
+            end
+            obj.Graph.Nodes.SchmidFactor = gSF;
+            obj.Graph.Nodes.InteractionWork = gIW;
         end
     end
 end
