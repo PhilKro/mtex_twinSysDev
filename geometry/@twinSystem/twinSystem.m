@@ -115,7 +115,7 @@ classdef twinSystem
 
         function [shearvector, shearMagnitude] = shear(tS)
             shearvector = 2 * (tS.k1.normalize - dot(tS.eta2.normalize, tS.k1.normalize).^-1 .* tS.eta2.normalize);
-            shearvector.dispStyle = 'UVTW';
+            if isa(shearvector,'Miller'), shearvector.dispStyle = 'UVTW'; end
             shearMagnitude = norm(shearvector);
         end
 
