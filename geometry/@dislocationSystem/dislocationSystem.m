@@ -61,7 +61,10 @@ classdef dislocationSystem
         dS.l = [dS.l(:);b(:)];
         
         % line energy
-        dS.u = 1 + dS.isEdge;
+        % dS.u = 1 + dS.isEdge;
+        nu = 0.3;
+        dS(dS.isEdge).u = dS(dS.isEdge).b.norm.^2;
+        dS(dS.isScrew).u = dS(dS.isScrew).b.norm.^2 * (1 - nu);
         
       else
         
