@@ -90,6 +90,8 @@ budget, trim from outside these first.
 | grain boundary smoothing | `core/check_boundaryChains` (order/topology) + `core/check_gbnd` (the ebsdId seam) |
 | grain boundary normal distribution, 2d | `core/check_gbnd` |
 | grain boundary normal distribution, 3d | `slow/check_gbnd3d` |
+| crystallographic twin systems | `core/check_twinSystem` |
+| graph-based twin structures | `core/check_twinNetwork` |
 | quadruple point merging | `slow/check_removeQuadruplePoints` |
 | 3d grains, face orientation | `slow/check_orientFaces` |
 | convolution, all type pairs | `core/check_convolution` |
