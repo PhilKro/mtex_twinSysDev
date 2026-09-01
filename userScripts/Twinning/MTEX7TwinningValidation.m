@@ -16,8 +16,8 @@ mtexdata twins silent
 ebsd = ebsd('indexed');
 [grains,ebsd] = calcGrains(ebsd,'threshold',5*degree);
 
-% Retain the smoothing used in the original TwinNetwork example.
-grains = smooth(grains,1);
+% Use the MTEX 7 boundary-smoothing API (including staircase removal).
+grains = smoothBoundary(grains,1);
 gB = grains.boundary;
 cs = grains(1).CS;
 
