@@ -48,6 +48,7 @@ ori = orientation.byEuler(20*degree,30*degree,10*degree,csH);
 rotated = ori * variants;
 assert(isa(rotated,'twinSystem') && length(rotated) == length(variants))
 assert(~isa(rotated.k1,'Miller') && ~isa(rotated.eta1,'Miller'))
+assert(all(isfinite(interactionWork(rotated,stressTensor.uniaxial(vector3d.Z)))))
 
 k2 = Miller(1,1,0,csC,'hkl');
 eta1 = Miller(1,1,1,csC,'uvw');
