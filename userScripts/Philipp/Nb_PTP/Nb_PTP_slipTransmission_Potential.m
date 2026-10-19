@@ -19,23 +19,23 @@ outDir  = fullfile(baseDir, 'Processed_Output');
 % For each analysis, specify the source grain/slip system and the target grain.
 analyses = struct();
 
-analyses(1).dic_prefix = 'B0005';
-analyses(1).sg_id      = 2; % Source grain ID
-analyses(1).sg_ss_idx  = 27; % Index of the active slip system in the source grain
-analyses(1).tg_id      = 1; % Target grain ID
-analyses(1).tg_ss_rank = 18; % Actual active target system rank for comparison
+% analyses(1).dic_prefix = 'B0005';
+% analyses(1).sg_id      = 2; % Source grain ID
+% analyses(1).sg_ss_idx  = 27; % Index of the active slip system in the source grain
+% analyses(1).tg_id      = 1; % Target grain ID
+% analyses(1).tg_ss_rank = 18; % Actual active target system rank for comparison
 
+analyses(1).dic_prefix = 'B0005';
+analyses(1).sg_id      = 2;
+analyses(1).sg_ss_idx  = 11;
+analyses(1).tg_id      = 1; 
+analyses(1).tg_ss_rank = 18;
+% 
 % analyses(2).dic_prefix = 'B0005';
 % analyses(2).sg_id      = 2;
-% analyses(2).sg_ss_idx  = 11;
+% analyses(2).sg_ss_idx  = 47;
 % analyses(2).tg_id      = 1; 
 % analyses(2).tg_ss_rank = 18;
-% 
-% analyses(3).dic_prefix = 'B0005';
-% analyses(3).sg_id      = 2;
-% analyses(3).sg_ss_idx  = 47;
-% analyses(3).tg_id      = 1; 
-% analyses(3).tg_ss_rank = 18;
 % 
 % analyses(4).dic_prefix = 'B0005';
 % analyses(4).sg_id      = 2;
@@ -319,12 +319,6 @@ for i_analysis = 1:length(analyses)
 
 
 
-    % --- Scatter Plot Visualization (Clustered by system type) ---
-    fig_scatter = figure;
-    fig_scatter.Name = 'Transmission Likelihood Scatter';
-    hold on;
-    grid on;
-
     % Define colors and markers for source systems
     source_markers = {'o', 's', 'd', '^', 'v', '>', '<'};  % Cycle through markers if more than 7 sources
     if num_sg_systems > length(source_markers)
@@ -332,9 +326,12 @@ for i_analysis = 1:length(analyses)
     end
     source_markers = source_markers(1:num_sg_systems);
 
-    % Plot each target system with points for each source system
-    legend_handles = [];
-    legend_labels = {};
+    % Collect scatter points data
+    m_prime_pts = [];
+    sf_pts = [];
+    res_b_pts = [];
+    marker_pts = {};
+
     for k = 1:height(sorted_table)
         sys_idx = sorted_table.Sys_Idx(k);
         sS_tg_current = sS_tg_all(sys_idx);
@@ -348,31 +345,61 @@ for i_analysis = 1:length(analyses)
             m_prime_s = abs(cos(angle(b_eff_k, sS_tg_current.b, 'noSymmetry')) * ...
                 cos(angle(sS_k.n, sS_tg_current.n, 'noSymmetry')));
             
-            % Calculate residual Burgers vector magnitude
-            % We consider both +/- directions of the target Burgers vector and take the minimum mismatch
+            % Calculate residual Burgers vector magnitude (in Angstroms [Å])
             res_b_mag = min(norm(b_eff_k - sS_tg_current.b), norm(b_eff_k + sS_tg_current.b));
             
-            h = scatter(m_prime_s, sf, 100, res_b_mag, source_markers{s}, ...
-                'filled', 'MarkerEdgeColor', 'k', 'LineWidth', 1.0);
-            
-            if k == 1  % Collect handles only once per source
-                % Create a dummy scatter plot for the legend (gray face) to avoid color confusion
-                h_dummy = scatter(NaN, NaN, 100, [0.5 0.5 0.5], source_markers{s}, ...
-                    'filled', 'MarkerEdgeColor', 'k', 'LineWidth', 1.0);
-                legend_handles = [legend_handles, h_dummy];
-                legend_labels = [legend_labels, sprintf('Source Sys %d', sg_ss_idx(s))];
-            end
+            m_prime_pts(end+1) = m_prime_s;
+            sf_pts(end+1) = sf;
+            res_b_pts(end+1) = res_b_mag;
+            marker_pts{end+1} = source_markers{s};
         end
     end
 
-    % Apply viridis colormap and colorbar for residual Burgers vector magnitude
+    % --- 1. Scatter Plot: Colored by Residual Burgers Vector Magnitude ---
+    fig_scatter_resb = figure;
+    fig_scatter_resb.Name = 'Transmission Likelihood Scatter (ResB Colored)';
+    set(fig_scatter_resb, 'Color', 'none', 'InvertHardcopy', 'off');
+    hold on;
+    set(gca, 'Color', 'none');
+
+    for i_pt = 1:length(m_prime_pts)
+        scatter(m_prime_pts(i_pt), sf_pts(i_pt), 100, res_b_pts(i_pt), marker_pts{i_pt}, ...
+            'filled', 'MarkerEdgeColor', 'k', 'LineWidth', 1.0);
+    end
+
+    % Apply viridis colormap and lock color limits to [2 8] with unit [Å]
     mtexColorMap viridis;
     cb = colorbar;
-    ylabel(cb, 'Residual Burgers Vector Mag. |\Delta b|');
+    caxis([2 8]);
+    ylabel(cb, 'Residual Burgers Vector Mag. |\Delta b| [\rm\AA]');
 
-    % Add legend
-    if ~isempty(legend_handles)
-        legend(legend_handles, legend_labels, 'Location', 'best');
+    hold off;
+    xlim([0, 1]);
+    ylim([0, 0.5]);
+    xlabel('Luster-Morris Parameter (m'')');
+    ylabel('Target Schmid Factor (SF)');
+    title(sprintf('Transmission Likelihood: G%d (Sys %s) -> G%d', sg_id, sg_ss_label, tg_id));
+    
+    scatter_path = fullfile(outDir, sprintf('Nodiff_PotentialTransmission_Scatter_%s_G%d-Sys%s_to_G%d.png', dic_prefix, sg_id, sg_ss_label, tg_id));
+    exportScaledFigure(fig_scatter_resb, scatter_path, 'target_px', 2500, 'noDateString');
+    fprintf('Saved likelihood scatter (colored) to: %s\n', scatter_path);
+    
+    scatter_resb_path = fullfile(outDir, sprintf('PotentialTransmission_Scatter_ResB_%s_G%d-Sys%s_to_G%d.png', dic_prefix, sg_id, sg_ss_label, tg_id));
+    exportScaledFigure(fig_scatter_resb, scatter_resb_path, 'target_px', 2500, 'noDateString');
+    fprintf('Saved likelihood scatter (ResB) to: %s\n', scatter_resb_path);
+
+    close(fig_scatter_resb);
+
+    % --- 2. Scatter Plot: Black Dots ---
+    fig_scatter_black = figure;
+    fig_scatter_black.Name = 'Transmission Likelihood Scatter (Black Dots)';
+    set(fig_scatter_black, 'Color', 'none', 'InvertHardcopy', 'off');
+    hold on;
+    set(gca, 'Color', 'none');
+
+    for i_pt = 1:length(m_prime_pts)
+        scatter(m_prime_pts(i_pt), sf_pts(i_pt), 100, 'k', marker_pts{i_pt}, ...
+            'filled', 'MarkerEdgeColor', 'k', 'LineWidth', 1.0);
     end
 
     hold off;
@@ -382,15 +409,11 @@ for i_analysis = 1:length(analyses)
     ylabel('Target Schmid Factor (SF)');
     title(sprintf('Transmission Likelihood: G%d (Sys %s) -> G%d', sg_id, sg_ss_label, tg_id));
     
-    scatter_path = fullfile(outDir, sprintf('Nodiff_PotentialTransmission_Scatter_%s_G%d-Sys%s_to_G%d.jpg', dic_prefix, sg_id, sg_ss_label, tg_id));
-    exportScaledFigure(fig_scatter, scatter_path, 'target_px', 2500, 'noDateString');
-    fprintf('Saved likelihood heatmap to: %s\n', scatter_path);
-    
-    scatter_annot_path = fullfile(outDir, sprintf('PotentialTransmission_Scatter_Annotated_%s_G%d-Sys%s_to_G%d.jpg', dic_prefix, sg_id, sg_ss_label, tg_id));
-    exportScaledFigure(fig_scatter, scatter_annot_path, 'target_px', 2500, 'noDateString');
-    fprintf('Saved annotated likelihood heatmap to: %s\n', scatter_annot_path);
+    scatter_black_path = fullfile(outDir, sprintf('PotentialTransmission_Scatter_Black_%s_G%d-Sys%s_to_G%d.png', dic_prefix, sg_id, sg_ss_label, tg_id));
+    exportScaledFigure(fig_scatter_black, scatter_black_path, 'target_px', 2500, 'noDateString');
+    fprintf('Saved likelihood scatter (black dots) to: %s\n', scatter_black_path);
 
-    close(fig_scatter);
+    close(fig_scatter_black);
 
     % --- Visualization ---
     % Plot the source system and the actually active target system

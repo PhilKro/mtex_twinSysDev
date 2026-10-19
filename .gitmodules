@@ -7,3 +7,6 @@
 [submodule "extern/matGeom"]
 	path = extern/matGeom
 	url = git@github.com:mattools/matGeom.git
+[submodule "userScripts/SSLIP"]
+	path = userScripts/SSLIP
+	url = https://github.com/PhilKro/SSLIP.git

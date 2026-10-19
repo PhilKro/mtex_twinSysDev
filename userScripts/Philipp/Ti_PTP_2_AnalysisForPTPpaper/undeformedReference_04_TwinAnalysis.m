@@ -6,6 +6,8 @@
 
 clear; close all; clc;
 
+thisDir = fileparts(mfilename('fullpath'));
+if ~isempty(thisDir), addpath(thisDir); end
 addpath('c:\Users\phkr\MTEX_workEnv\userScripts\HelperFunctions');
 addpath('c:\Users\phkr\MTEX_workEnv\geometry');
 
@@ -23,18 +25,20 @@ cfg = struct();
 cfg.process_increments        = [4]; 
 
 % --- Analysis & Plotting Mode Toggles ---
-cfg.enable_gradient_maps      = true;  % Plot 1: Full-map experimental displacement gradients (du/dx, du/dy, dv/dx, dv/dy)
+cfg.enable_gradient_maps      = false;  % Plot 1: Full-map experimental displacement gradients (du/dx, du/dy, dv/dx, dv/dy)
 cfg.enable_residual_norm_diff = false; % Plot 2: Residual norm difference maps to each primary variant
 cfg.enable_best_fit_primary   = true; % Plot 3: Best Fit Variant from direct norm difference (BestFitPrimary_FromDispGradient)
+cfg.best_fit_primary_thresh   = 0.2;  % Maximum residual norm difference threshold
+cfg.best_fit_primary_mag_cutoff = 0.4; % Minimum projection factor magnitude (x_proj) below which variant is not plotted
 cfg.enable_shape_mismatch     = false;  % Plot 4: Active variants from directional shape-mismatch minimization (Shape_Mismatch_Variants)
 cfg.enable_projection_factor  = false;  % Plot 5: Scalar projection factor x map (Scalar_Projection_Factor)
 cfg.enable_all_variants_breakdown = false; % Plot 6 & 7: Multi-panel comparison of shape mismatch and projection factor for all individual variants (1 to N)
 cfg.enable_var3_vs_var6_comparison = false; % Plot 8: Direct comparison between Variant 3 and Variant 6
 
 % --- Selection Metric Weights ---
+cfg.weight_series_enable = false;          % Generate a series of active variant maps for varying magnitude weights
 cfg.weight_shape = 1.0; % Weight for shape mismatch cost (minimize shape mismatch)
 cfg.weight_mag   = 0.5; % Weight for projection factor deviation cost (minimize |x - 1.0|)
-cfg.weight_series_enable = true;          % Generate a series of active variant maps for varying magnitude weights
 cfg.weight_series_mag_weights = 0.2:0.2:1.0; % The magnitude weights to loop over (shape weight stays at 1.0)
 
 % --- Tilt Sensitivity Series Configuration ---
@@ -61,7 +65,11 @@ matname = matFiles(idx).name;
 fprintf('Loading undeformed reference dataset:\n  %s\n', fullfile(inDir, matname));
 dataLoaded = load(fullfile(inDir, matname));
 newEBSD = dataLoaded.newEBSD;
-options = dataLoaded.options;
+if isfield(dataLoaded, 'options')
+    options = dataLoaded.options;
+else
+    options = struct();
+end
 
 %% 2. Retrieve or Reconstruct Grains
 grainThresh = 5*degree; 
@@ -269,22 +277,7 @@ for idx_inc = inc_indices
         close(figNorm);
     end
     
-    % --- Plot 3: Best Fit Primary Variant from Displacement Gradient Difference ---
-    if cfg.enable_best_fit_primary
-        threshP = 0.2;
-        [fitPrimary, bestFitPrimary] = min(NormDiff, [], 2);
-        plotColorGrad = ones(length(bestFitPrimary), 3);
-        plotColorGrad(fitPrimary < threshP, :) = colors_p(bestFitPrimary(fitPrimary < threshP), :);
-        
-        figBestFit = figure('Visible', 'off');
-        plot(newEBSD, plotColorGrad); colormap(colors_p); caxis([1 N]); mtexColorbar; hold on;
-        plot(grains.boundary('indexed', 'notIndexed'), 'lineColor', 'k', 'linewidth', 2);
-        title(sprintf('[%s] Best Fit Variant from Disp Gradient (Res < %.2f)', prefix, threshP), 'Interpreter', 'none'); hold off;
-        exportScaledFigure(figBestFit, fullfile(outDir, [prefix, '_BestFitPrimary_FromDispGradient.png']), 'nodatestring');
-        close(figBestFit);
-    end
-    
-    % --- Plot 4 & 5: Advanced Map-Wide Shape Mismatch & Scalar Projection Factor ---
+    % --- Map-Wide Shape Mismatch & Scalar Projection Factor ---
     He_flat = reshape(H_exp, 4, nPoints);
     shapeMismatch = zeros(N, nPoints);
     magnitudeX = zeros(N, nPoints);
@@ -297,6 +290,37 @@ for idx_inc = inc_indices
     end
     shapeMismatch(:, nanField) = NaN;
     magnitudeX(:, nanField) = NaN;
+    
+    % --- Plot 3: Best Fit Primary Variant from Displacement Gradient Difference ---
+    if cfg.enable_best_fit_primary
+        threshP = 0.2;
+        if isfield(cfg, 'best_fit_primary_thresh'), threshP = cfg.best_fit_primary_thresh; end
+        magCutoffP = 0.05;
+        if isfield(cfg, 'best_fit_primary_mag_cutoff'), magCutoffP = cfg.best_fit_primary_mag_cutoff; end
+        
+        [fitPrimary, bestFitPrimary] = min(NormDiff, [], 2);
+        linIdx_p = sub2ind(size(magnitudeX), bestFitPrimary(:)', 1:nPoints);
+        bestFitMagX = magnitudeX(linIdx_p)';
+        
+        validPrimary = (fitPrimary < threshP) & (bestFitMagX > magCutoffP) & ~isnan(bestFitMagX);
+        
+        plotColorGrad = ones(length(bestFitPrimary), 3);
+        plotColorGrad(validPrimary, :) = colors_p(bestFitPrimary(validPrimary), :);
+        
+        figBestFit = figure('Visible', 'off');
+        plot(newEBSD, plotColorGrad); colormap(colors_p); caxis([1 N]); mtexColorbar; hold on;
+        plot(grains.boundary('indexed', 'notIndexed'), 'lineColor', 'k', 'linewidth', 2);
+        if magCutoffP > 0
+            title(sprintf('[%s] Best Fit Variant from Disp Gradient (Res < %.2f, ProjFactor > %.2f)', prefix, threshP, magCutoffP), 'Interpreter', 'none');
+        else
+            title(sprintf('[%s] Best Fit Variant from Disp Gradient (Res < %.2f)', prefix, threshP), 'Interpreter', 'none');
+        end
+        hold off;
+        exportScaledFigure(figBestFit, fullfile(outDir, [prefix, '_BestFitPrimary_FromDispGradient.png']), 'nodatestring');
+        close(figBestFit);
+    end
+    
+    % --- Plot 4 & 5: Advanced Map-Wide Shape Mismatch & Scalar Projection Factor ---
     
     % Evaluate combined cost metric
     weight_s = 1.0; if isfield(cfg, 'weight_shape'), weight_s = cfg.weight_shape; end
@@ -325,6 +349,18 @@ for idx_inc = inc_indices
         title(sprintf('[%s] Active Twinning Variants (Shape Mismatch < %.2f)', prefix, shapeCutoff), 'Interpreter', 'none'); hold off;
         exportScaledFigure(figShape, fullfile(outDir, [prefix, '_Shape_Mismatch_Variants.png']), 'nodatestring');
         close(figShape);
+
+        % Continuous Shape Mismatch Map
+        shape_cRange = [0, 0.5];
+        plotMism = minMismatch;
+        plotMism(isnan(plotMism)) = shape_cRange(1);
+        
+        figMism = figure('Visible', 'off');
+        plot(newEBSD, plotMism); colormap viridis; setColorRange(shape_cRange); mtexColorbar; hold on;
+        plot(grains.boundary('indexed', 'notIndexed'), 'lineColor', 'k', 'linewidth', 1.5);
+        title(sprintf('[%s] Best Fit Shape Mismatch Map', prefix), 'Interpreter', 'none'); hold off;
+        exportScaledFigure(figMism, fullfile(outDir, [prefix, '_Shape_Mismatch_Map.png']), 'nodatestring');
+        close(figMism);
     end
     
     % --- Optional: Weight Series Generation ---
@@ -358,8 +394,12 @@ for idx_inc = inc_indices
     
     % --- Plot 5: Scalar Projection Factor x ---
     if cfg.enable_projection_factor
+        proj_cRange = [0.05, 1.25];
+        plotProj = bestMagnitudeX;
+        plotProj(isnan(plotProj)) = proj_cRange(1);
+        
         figProj = figure('Visible', 'off');
-        plot(newEBSD, bestMagnitudeX); colormap turbo; setColorRange([0.05, 1.25]); mtexColorbar; hold on;
+        plot(newEBSD, plotProj); colormap viridis; setColorRange(proj_cRange); mtexColorbar; hold on;
         plot(grains.boundary('indexed', 'notIndexed'), 'lineColor', 'k', 'linewidth', 1.5);
         title(sprintf('[%s] Scalar Projection Factor x (1.0 = Theoretical Shear)', prefix), 'Interpreter', 'none'); hold off;
         exportScaledFigure(figProj, fullfile(outDir, [prefix, '_Scalar_Projection_Factor.png']), 'nodatestring');
@@ -372,14 +412,17 @@ for idx_inc = inc_indices
         nRows = ceil(N / nCols);
         
         % 1. Shape Mismatch across all individual variants
+        shape_cRange = [0, 0.5];
         figAllMism = figure('Name', 'Shape Mismatch All Variants', 'Visible', 'off');
         newMtexFigure('layout', [nRows, nCols]);
         for v = 1:N
             if v > 1, nextAxis; end
-            plot(newEBSD, shapeMismatch(v, :)); hold on;
+            plotMism_v = shapeMismatch(v, :);
+            plotMism_v(isnan(plotMism_v)) = shape_cRange(1);
+            plot(newEBSD, plotMism_v); hold on;
             plot(grains.boundary('indexed', 'notIndexed'), 'lineColor', 'k', 'linewidth', 1);
             title(sprintf('Var %d Shape Mismatch', v));
-            colormap(gca, 'parula'); setColorRange([0, 0.5]); hold off;
+            colormap(gca, 'viridis'); setColorRange(shape_cRange); hold off;
         end
         mtexColorbar;
         sgtitle(sprintf('[%s] Shape Mismatch across All Variants (Lower = Better Fit)', prefix), 'Interpreter', 'none');
@@ -387,14 +430,17 @@ for idx_inc = inc_indices
         close(figAllMism);
         
         % 2. Scalar Projection Factor x across all individual variants
+        proj_cRange = [0.05, 1.25];
         figAllMag = figure('Name', 'Scalar Projection Factor All Variants', 'Visible', 'off');
         newMtexFigure('layout', [nRows, nCols]);
         for v = 1:N
             if v > 1, nextAxis; end
-            plot(newEBSD, magnitudeX(v, :)); hold on;
+            plotMag_v = magnitudeX(v, :);
+            plotMag_v(isnan(plotMag_v)) = proj_cRange(1);
+            plot(newEBSD, plotMag_v); hold on;
             plot(grains.boundary('indexed', 'notIndexed'), 'lineColor', 'k', 'linewidth', 1);
             title(sprintf('Var %d Projection Factor x', v));
-            colormap(gca, 'turbo'); setColorRange([0.05, 1.25]); hold off;
+            colormap(gca, 'viridis'); setColorRange(proj_cRange); hold off;
         end
         mtexColorbar;
         sgtitle(sprintf('[%s] Scalar Projection Factor across All Variants (1.0 = Theo Shear)', prefix), 'Interpreter', 'none');
@@ -410,13 +456,19 @@ for idx_inc = inc_indices
         diff_shape = shapeMismatch(vB, :) - shapeMismatch(vA, :); % < 0 means vB (6) has lower (better) shape mismatch
         diff_mag   = magnitudeX(vB, :) - magnitudeX(vA, :);
         
-      
+        shape_cRange = [0, 0.5];
+        proj_cRange  = [0.05, 1.25];
+
         % Row 1: Shape Mismatch
-        figure; plot(newEBSD, shapeMismatch(vA, :)); colormap(gca, 'parula'); setColorRange([0, 0.5]); mtexColorbar;
+        plotMism_vA = shapeMismatch(vA, :);
+        plotMism_vA(isnan(plotMism_vA)) = shape_cRange(1);
+        figure; plot(newEBSD, plotMism_vA); colormap(gca, 'viridis'); setColorRange(shape_cRange); mtexColorbar;
         title(sprintf('Var %d Shape Mismatch', vA)); hold on; plot(grains.boundary('indexed', 'notIndexed'), 'lineColor', 'k', 'linewidth', 1);
         exportScaledFigure(gcf, fullfile(outDir, [prefix, '_ShapeMismatch', '_Var', num2str(vA), '.jpg']), 'nodatestring'); close(gcf);   
 
-        figure; plot(newEBSD, shapeMismatch(vB, :)); colormap(gca, 'parula'); setColorRange([0, 0.5]); mtexColorbar;
+        plotMism_vB = shapeMismatch(vB, :);
+        plotMism_vB(isnan(plotMism_vB)) = shape_cRange(1);
+        figure; plot(newEBSD, plotMism_vB); colormap(gca, 'viridis'); setColorRange(shape_cRange); mtexColorbar;
         title(sprintf('Var %d Shape Mismatch', vB)); hold on; plot(grains.boundary('indexed', 'notIndexed'), 'lineColor', 'k', 'linewidth', 1);
         exportScaledFigure(gcf, fullfile(outDir, [prefix, '_ShapeMismatch', '_Var', num2str(vB), '.jpg']), 'nodatestring'); close(gcf); 
 
@@ -428,11 +480,15 @@ for idx_inc = inc_indices
         exportScaledFigure(gcf, fullfile(outDir, [prefix, '_ShapeMismatch', '_Var', num2str(vB), '-Var', num2str(vA),'.jpg']), 'nodatestring'); close(gcf);
 
         % Row 2: Projection Factor
-        figure; plot(newEBSD, magnitudeX(vA, :)); colormap(gca, 'turbo'); setColorRange([0.05, 1.25]); mtexColorbar;
+        plotMag_vA = magnitudeX(vA, :);
+        plotMag_vA(isnan(plotMag_vA)) = proj_cRange(1);
+        figure; plot(newEBSD, plotMag_vA); colormap(gca, 'viridis'); setColorRange(proj_cRange); mtexColorbar;
         title(sprintf('Var %d Proj Factor', vA)); hold on; plot(grains.boundary('indexed', 'notIndexed'), 'lineColor', 'k', 'linewidth', 1);
         exportScaledFigure(gcf, fullfile(outDir, [prefix, '_ProjectionFactor', '_Var', num2str(vA), '.jpg']), 'nodatestring'); close(gcf);
         
-        figure; plot(newEBSD, magnitudeX(vB, :)); colormap(gca, 'turbo'); setColorRange([0.05, 1.25]); mtexColorbar;
+        plotMag_vB = magnitudeX(vB, :);
+        plotMag_vB(isnan(plotMag_vB)) = proj_cRange(1);
+        figure; plot(newEBSD, plotMag_vB); colormap(gca, 'viridis'); setColorRange(proj_cRange); mtexColorbar;
         title(sprintf('Var %d Proj Factor', vB)); hold on; plot(grains.boundary('indexed', 'notIndexed'), 'lineColor', 'k', 'linewidth', 1);
         exportScaledFigure(gcf, fullfile(outDir, [prefix, '_ProjectionFactor', '_Var', num2str(vB), '.jpg']), 'nodatestring'); close(gcf);
         
@@ -541,11 +597,12 @@ for idx_inc = inc_indices
             
             % Plot 2: Scalar Projection Factor x under Tilt
             if cfg.enable_projection_factor
+                proj_cRange = [0.05, 1.25];
                 bestMagX_plot = bestMagX_t;
-                bestMagX_plot(bestMagX_t > 1.5) = 0;
+                bestMagX_plot(bestMagX_t > 1.5 | isnan(bestMagX_plot)) = proj_cRange(1);
                 
                 figT2 = figure('Visible', 'off');
-                plot(newEBSD, bestMagX_plot); colormap turbo; setColorRange([0.05, 1.25]); mtexColorbar; hold on;
+                plot(newEBSD, bestMagX_plot); colormap viridis; setColorRange(proj_cRange); mtexColorbar; hold on;
                 plot(grains.boundary('indexed', 'notIndexed'), 'lineColor', 'k', 'linewidth', 1.5);
                 title(sprintf('[%s] Scalar Projection Factor x (%s Tilt %+d°)', prefix, axisStr, tilt_deg), 'Interpreter', 'none'); hold off;
                 exportScaledFigure(figT2, fullfile(tiltDir, sprintf('%s_%s_Scalar_Projection_Factor_Tilt_%+ddeg.png', prefix, axisStr, tilt_deg)), 'nodatestring');
@@ -554,11 +611,12 @@ for idx_inc = inc_indices
             
             % Plot 3: Shape Mismatch under Tilt
             if cfg.enable_residual_norm_diff
+                shape_cRange = [0, cfg.tilt_series.shapeCutoff];
                 minMismatch_plot = minMismatch_t;
-                minMismatch_plot(minMismatch_t > 1) = 0;
+                minMismatch_plot(minMismatch_t > 1 | isnan(minMismatch_plot)) = shape_cRange(1);
                 
                 figT3 = figure('Visible', 'off');
-                plot(newEBSD, minMismatch_plot); colormap viridis; setColorRange([0, cfg.tilt_series.shapeCutoff]); mtexColorbar; hold on;
+                plot(newEBSD, minMismatch_plot); colormap viridis; setColorRange(shape_cRange); mtexColorbar; hold on;
                 plot(grains.boundary('indexed', 'notIndexed'), 'lineColor', 'k', 'linewidth', 1.5);
                 title(sprintf('[%s] Shape Mismatch Map (%s Tilt %+d°)', prefix, axisStr, tilt_deg), 'Interpreter', 'none'); hold off;
                 exportScaledFigure(figT3, fullfile(tiltDir, sprintf('%s_%s_ShapeMismatch_Map_Tilt_%+ddeg.png', prefix, axisStr, tilt_deg)), 'nodatestring');

@@ -429,7 +429,7 @@ function clusters = cluster_and_plot(grain_id, slip_mags, sSLocal, mask, ebsdID,
         b_vec = sSLocal(main_sys_idx).b.normalize;
         b_vec.antipodal = true;
         hold on
-        % quiver(grainsUndef(grain_id), b_vec, 'color', 'w', 'linewidth', 2);
+        quiver(grainsUndef(grain_id), b_vec, 'color', 'w', 'linewidth', 2);
         
         % Prepare Annotation Box
         % Find the rank of the main system globally

@@ -9,8 +9,10 @@ plottingConvention.default.east = xvector;
 plottingConvention.default.outOfScreen = -zvector;
 
 % filename
-dir = 'N:\EBSD-Analysis-2\Tijmen\Re tensile 1\h5oina\';
-file = 'Re tensile 1 Specimen 1 Site 4 Map Data 4_Map_Data_4_BW203.ang';
+% dir = 'N:\EBSD-Analysis-2\Tijmen\Re tensile 1\h5oina\';
+% file = 'Re tensile 1 Specimen 1 Site 4 Map Data 4_Map_Data_4_BW203.ang';
+dir = 'N:\EBSD-Analysis-2\Tijmen\Re HSR 1';
+file = "Re HSR twin right region 2 Site 1 Map Data 7_Map_Data_7_BW123.ang";
 % dir = 'onedriveData/Kamila';
 % file = 'pillar29 Specimen 3 Site 1 Map Data 3_BW158.ang';
 
@@ -160,41 +162,71 @@ tS_1121 = twinSystem.hexagonal_1121(CS);
 % 2. Initialize the TwinNetwork
 % This class neatly encapsulates the graph-theoretical topology extraction,
 % multi-region decomposition, and exact reference frame propagation.
-network = TwinNetwork(grains, gB, tS_1121, ebsd, ...
+network = twinNetwork(grains, gB, tS_1121, ebsd, ...
     'thresh', 8*degree);
 
 % 3. Execute the topological pipeline step-by-step
 disp('Step 1: Building Initial Topology...');
-G = network.buildInitialGraph();
-network.plotGraph(G);
+network.buildInitialGraph();
+network.plotGraph(network.Graph);
 title('Step 1: Initial Raw Topology');
 
 disp('Step 2: Extracting Spanning Tree...');
-mstG = network.extractSpanningTree(G);
-network.plotGraph(mstG);
+network.extractSpanningTree();
+network.plotGraph(network.mstGraph);
 title('Step 2: Minimum Spanning Tree');
 
 disp('Step 3: Resolving Node States and Variants...');
-mstG = network.resolveNodeStates(mstG);
-network.plotGraph(mstG);
+network.resolveNodeStates();
+network.plotGraph(network.mstGraph);
 title('Step 3: MST after FZ Propagation');
 
 % disp('Step 4: Pruning and Rewiring Outliers...');
-% mstG = network.pruneAndRewireOutliers(mstG, 'debug', true);
-% % mstG = network.pruneAndRewireOutliers(mstG, 'targetNode', 56, 'debug', true);
-% network.plotGraph(mstG);
+% network.pruneAndRewireOutliers('debug', true);
+% % network.pruneAndRewireOutliers('targetNode', 56, 'debug', true);
+% network.plotGraph(network.mstGraph);
 % title('Step 4: MST after Pruning and Rewiring');
 
 disp('Step 5: Reducing to Quotient Graph...');
-Q = network.reduceToQuotient(mstG);
-network.plotGraph(Q);
-title('Step 5: Final Quotient Graph');
+network.reduceToQuotient();
+network.plotGraph(network.QuotientGraph, 'showBackground', false, 'layout', 'layered', 'scaleNodesByArea', true);
+title('Step 5: Final Quotient Graph (Hierarchical, Area-scaled)');
 
 disp('Step 6: Plotting grains with twin generation assignment...');
 network.plot('twinsOnly', false);
 title('Step 6: Twin generations');
 
-% network.plotSigmaSections(mstG);
+disp('Step 7: Calculating and plotting Schmid Factors...');
+% Calculate Schmid factors for uniaxial tension along the x-direction
+% sigma = stressTensor.uniaxial(xvector);
+sigma = stressTensor.uniaxial(yvector);
+[sf, iw] = network.analyzeMechanics(sigma);
+
+figure;
+plot(network.grains, sf, 'micronbar', 'off');
+colormap jet;
+clim([0 0.5]);
+mtexColorbar;
+title('Twin Schmid Factor Map (Colorbar)');
+
+figure;
+plot(network.grains, sf, 'micronbar', 'off');
+colormap jet;
+clim([0 0.5]);
+title('Twin Schmid Factor Map (Labels)');
+hold on;
+valid_idx = find(~isnan(sf));
+if ~isempty(valid_idx)
+    sf_valid = sf(valid_idx);
+    x_cents = network.grains.centroid.x(valid_idx);
+    y_cents = network.grains.centroid.y(valid_idx);
+    labels = cellstr(num2str(sf_valid, '%.2f'));
+    text(x_cents, y_cents, labels, 'HorizontalAlignment', 'center', 'VerticalAlignment', 'middle', 'FontSize', 8, 'FontWeight', 'bold');
+end
+mtexColorbar
+hold off;
+
+% network.plotSigmaSections();
 
 
 % Save remaining figures

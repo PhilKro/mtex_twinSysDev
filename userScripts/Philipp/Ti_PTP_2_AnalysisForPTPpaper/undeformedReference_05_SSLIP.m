@@ -28,7 +28,11 @@ matname = matFiles(idx).name;
 fprintf('Loading undeformed reference dataset:\n  %s\n', fullfile(inDir, matname));
 dataLoaded = load(fullfile(inDir, matname));
 newEBSD = dataLoaded.newEBSD;
-options = dataLoaded.options;
+if isfield(dataLoaded, 'options')
+    options = dataLoaded.options;
+else
+    options = struct();
+end
 [~, matname_noext, ~] = fileparts(matname);
 
 %% 2. Retrieve or Reconstruct Grains

@@ -69,7 +69,11 @@ classdef dislocationSystem
         dS.l = [dS.l(:);b(:)];
         
         % line energy
-        dS.u = 1 + dS.isEdge;
+        % dS.u = 1 + dS.isEdge;
+        nu = 0.3;
+        dS.u = zeros(size(dS.b));
+        dS.u(dS.isEdge) = dS.b(dS.isEdge).norm.^2;
+        dS.u(dS.isScrew) = dS.b(dS.isScrew).norm.^2 * (1 - nu);
         
       else
         
@@ -81,7 +85,11 @@ classdef dislocationSystem
         dS.b = sS;
         l.antipodal = true;
         dS.l = l;
-        if nargin < 3, u = 1; end
+        if nargin < 3, 
+            % if l||b it's screw i.e. u = b.norm.^2 * (1 - nu);
+            % if l perpendicular b it's edge i.e. u = b.norm.^2;
+            u = 1; 
+        end
         if numel(u) ~= length(dS.b), u = repmat(u,size(dS.b)); end
         dS.u = u;
         

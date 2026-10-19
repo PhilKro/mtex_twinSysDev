@@ -29,6 +29,14 @@ end
 ref_prefix = 'B0005';
 cmp_prefixes = {'B0007', 'B0003'}; % You can add more prefixes here
 
+% --- Plotting Toggles ---
+opt_plot = struct();
+opt_plot.plot_bicrystal = false;   % Toggle combined bicrystal plots
+opt_plot.plot_grain1    = false;   % Toggle single Grain 1 plots (Grain 2 grayed out)
+opt_plot.plot_grain2    = true;   % Toggle single Grain 2 plots (Grain 1 grayed out)
+opt_plot.withQuivers    = false;   % Generate plots with quiver traces/Burgers vectors
+opt_plot.withoutQuivers = true;   % Generate plots without quiver overlays
+
 opt_bundle = struct();
 opt_bundle.activityPercentile = 85;
 opt_bundle.activityThreshold  = 0; 
@@ -219,91 +227,194 @@ for p_idx = 1:length(all_prefixes)
     % Background drawing options
     opt_ctx = struct('plotGrainContext', true, 'grains', grainsUndef, 'grainLineColor', 'k', 'grainLineWidth', 2);
     
-    % Loop over the different requested color limits
-    for c_idx = 1:length(clims_to_plot)
-        current_clim = clims_to_plot{c_idx};
-        
-        for plot_quivers = [true, false]
-            if plot_quivers
-                q_str = 'withQuivers';
-            else
-                q_str = 'noQuivers';
-            end
+    % Centroids for grain quiver placements
+    cx1 = grainsUndef(g1_id).centroid.x;
+    cy1 = grainsUndef(g1_id).centroid.y;
+    cx2 = grainsUndef(g2_id).centroid.x;
+    cy2 = grainsUndef(g2_id).centroid.y;
+
+    % Determine which quiver modes to render based on toggles
+    quiver_modes = [];
+    if isfield(opt_plot, 'withQuivers') && opt_plot.withQuivers, quiver_modes(end+1) = true; end
+    if isfield(opt_plot, 'withoutQuivers') && opt_plot.withoutQuivers, quiver_modes(end+1) = false; end
+    if isempty(quiver_modes), quiver_modes = [true]; end
+
+    %% 4. Combined Bicrystal Plotting
+    if opt_plot.plot_bicrystal
+        for c_idx = 1:length(clims_to_plot)
+            current_clim = clims_to_plot{c_idx};
             
-            fig = figure('Name', sprintf('Combined SSLIP Bicrystal Analysis - %s (clim: %.3f-%.3f) [%s]', current_prefix, current_clim(1), current_clim(2), q_str), 'Visible', 'off');
-            newMtexFigure('layout', [1, num_subplots], 'figSize', 'huge');
-            
-            for t_i = 1:num_subplots
-                nextAxis;
-                plotSSLIP_Context(opt_ctx);
-                
-                hold on;
-                plot(ebsdID, combined_activities(:, t_i), 'micronbar', 'off');
-                mtexColorMap parula; try mtexColorMap viridis; catch, end;
-                setColorRange(current_clim);
-                
-                % Redraw grain boundaries ON TOP so they survive the activity field plotting!
-                hold on;
-                plot(opt_ctx.grains.boundary, 'linecolor', opt_ctx.grainLineColor, 'linewidth', opt_ctx.grainLineWidth);
-                
-                if t_i <= n_top
-                    hold on;
-                    rep_g1 = bundles_g1{t_i}(1);
-                    rep_g2 = bundles_g2{t_i}(1);
-                    
-                    if plot_quivers
-                        % Centered Quiver Traces (match plotSSLIP_SlipActivities aesthetics exactly)
-                        quiver_scale = opt_bundle.quiver_length_factor * (max(ebsdID.x,[],'all') - min(ebsdID.x,[],'all'));
-                        
-                        % Anchor points for G1 and G2 using true grain centroids
-                        cx1 = grainsUndef(g1_id).centroid.x;
-                        cy1 = grainsUndef(g1_id).centroid.y;
-                        cx2 = grainsUndef(g2_id).centroid.x;
-                        cy2 = grainsUndef(g2_id).centroid.y;
-                        
-                        % Quivers for G1
-                        quiver(cx1, cy1, quiver_scale * sSLocal_1(rep_g1).trace.x, 0.5*quiver_scale * sSLocal_1(rep_g1).trace.y, 'color', 'r', 'linewidth', 5, 'ShowArrowHead', 'off');
-                        quiver(cx1, cy1, quiver_scale * sSLocal_1(rep_g1).b.normalize.x, quiver_scale * sSLocal_1(rep_g1).b.normalize.y, 'color', 'r', 'linewidth', 2);
-                        
-                        % Quivers for G2
-                        quiver(cx2, cy2, quiver_scale * sSLocal_2(rep_g2).trace.x, 0.5*quiver_scale * sSLocal_2(rep_g2).trace.y, 'color', 'r', 'linewidth', 5, 'ShowArrowHead', 'off');
-                        quiver(cx2, cy2, quiver_scale * sSLocal_2(rep_g2).b.normalize.x, quiver_scale * sSLocal_2(rep_g2).b.normalize.y, 'color', 'r', 'linewidth', 2);
-                    end
-                    
-                    % Annotation String for Title
-                    stress = stressTensor.uniaxial(xvector);
-                    sf_g1 = abs(sSLocal_1(rep_g1).SchmidFactor(stress));
-                    sf_g2 = abs(sSLocal_2(rep_g2).SchmidFactor(stress));
-                    
-                    sys_rep_g1 = inv(ori1) * sSLocal_1(rep_g1);
-                    sys_rep_g2 = inv(ori2) * sSLocal_2(rep_g2);
-                    
-                    n1 = round(sys_rep_g1.n); b1 = round(sys_rep_g1.b, 'uvw');
-                    n2 = round(sys_rep_g2.n); b2 = round(sys_rep_g2.b, 'uvw');
-                    
-                    sys_str_g1 = sprintf('(%.0f %.0f %.0f)[%.0f %.0f %.0f]', n1.h, n1.k, n1.l, b1.u, b1.v, b1.w);
-                    sys_str_g2 = sprintf('(%.0f %.0f %.0f)[%.0f %.0f %.0f]', n2.h, n2.k, n2.l, b2.u, b2.v, b2.w);
-                    
-                    % Put the clean text into the title directly (no crash-prone annotation boxes!)
-                    title_str = sprintf('[Bundle %d]\nG1 (%d sys): %s | SF=%.2f\nG2 (%d sys): %s | SF=%.2f', ...
-                        t_i, length(bundles_g1{t_i}), sys_str_g1, sf_g1, ...
-                        length(bundles_g2{t_i}), sys_str_g2, sf_g2);
-                    title(title_str, 'Interpreter', 'none');
+            for plot_quivers = quiver_modes
+                if plot_quivers
+                    q_str = 'withQuivers';
                 else
-                    title(sprintf('[Leftover Activity]\nG1: %d sys | G2: %d sys', length(leftover_g1), length(leftover_g2)));
+                    q_str = 'noQuivers';
+                end
+                
+                fig = figure('Name', sprintf('Combined SSLIP Bicrystal Analysis - %s (clim: %.3f-%.3f) [%s]', current_prefix, current_clim(1), current_clim(2), q_str), 'Visible', 'off');
+                newMtexFigure('layout', [1, num_subplots], 'figSize', 'huge');
+                
+                for t_i = 1:num_subplots
+                    nextAxis;
+                    plotSSLIP_Context(opt_ctx);
+                    
+                    hold on;
+                    plot(ebsdID, combined_activities(:, t_i), 'micronbar', 'off');
+                    mtexColorMap parula; try mtexColorMap viridis; catch, end;
+                    setColorRange(current_clim);
+                    
+                    % Redraw grain boundaries ON TOP so they survive the activity field plotting!
+                    hold on;
+                    plot(opt_ctx.grains.boundary, 'linecolor', opt_ctx.grainLineColor, 'linewidth', opt_ctx.grainLineWidth);
+                    
+                    if t_i <= n_top
+                        hold on;
+                        rep_g1 = bundles_g1{t_i}(1);
+                        rep_g2 = bundles_g2{t_i}(1);
+                        
+                        if plot_quivers
+                            % Centered Quiver Traces (match plotSSLIP_SlipActivities aesthetics exactly)
+                            quiver_scale = opt_bundle.quiver_length_factor * (max(ebsdID.x,[],'all') - min(ebsdID.x,[],'all'));
+                            
+                            % Quivers for G1
+                            quiver(cx1, cy1, quiver_scale * sSLocal_1(rep_g1).trace.x, 0.5*quiver_scale * sSLocal_1(rep_g1).trace.y, 'color', 'r', 'linewidth', 5, 'ShowArrowHead', 'off');
+                            quiver(cx1, cy1, quiver_scale * sSLocal_1(rep_g1).b.normalize.x, quiver_scale * sSLocal_1(rep_g1).b.normalize.y, 'color', 'r', 'linewidth', 2);
+                            
+                            % Quivers for G2
+                            quiver(cx2, cy2, quiver_scale * sSLocal_2(rep_g2).trace.x, 0.5*quiver_scale * sSLocal_2(rep_g2).trace.y, 'color', 'r', 'linewidth', 5, 'ShowArrowHead', 'off');
+                            quiver(cx2, cy2, quiver_scale * sSLocal_2(rep_g2).b.normalize.x, quiver_scale * sSLocal_2(rep_g2).b.normalize.y, 'color', 'r', 'linewidth', 2);
+                        end
+                        
+                        % Annotation String for Title
+                        stress = stressTensor.uniaxial(xvector);
+                        sf_g1 = abs(sSLocal_1(rep_g1).SchmidFactor(stress));
+                        sf_g2 = abs(sSLocal_2(rep_g2).SchmidFactor(stress));
+                        
+                        sys_rep_g1 = inv(ori1) * sSLocal_1(rep_g1);
+                        sys_rep_g2 = inv(ori2) * sSLocal_2(rep_g2);
+                        
+                        n1 = round(sys_rep_g1.n); b1 = round(sys_rep_g1.b, 'uvw');
+                        n2 = round(sys_rep_g2.n); b2 = round(sys_rep_g2.b, 'uvw');
+                        
+                        sys_str_g1 = sprintf('(%.0f %.0f %.0f)[%.0f %.0f %.0f]', n1.h, n1.k, n1.l, b1.u, b1.v, b1.w);
+                        sys_str_g2 = sprintf('(%.0f %.0f %.0f)[%.0f %.0f %.0f]', n2.h, n2.k, n2.l, b2.u, b2.v, b2.w);
+                        
+                        % Put the clean text into the title directly (no crash-prone annotation boxes!)
+                        title_str = sprintf('[Bundle %d]\nG1 (%d sys): %s | SF=%.2f\nG2 (%d sys): %s | SF=%.2f', ...
+                            t_i, length(bundles_g1{t_i}), sys_str_g1, sf_g1, ...
+                            length(bundles_g2{t_i}), sys_str_g2, sf_g2);
+                        title(title_str, 'Interpreter', 'none');
+                    else
+                        title(sprintf('[Leftover Activity]\nG1: %d sys | G2: %d sys', length(leftover_g1), length(leftover_g2)));
+                    end
+                end
+                
+                mtexColorbar('title', 'Combined Slip Activity (\gamma)');
+                
+                % Export
+                clim_str = sprintf('clim_%.3f_%.3f', current_clim(1), current_clim(2));
+                clim_str = strrep(clim_str, '.', 'p');
+                fig_path = fullfile(plotDir, sprintf('Combined_Bicrystal_SSLIP_%s_%s_%s.jpg', current_prefix, clim_str, q_str));
+                exportScaledFigure(fig, fig_path, 'target_px', 3000, 'noDateString');
+                close(fig);
+                
+                fprintf('Exported plot to: %s\n', fig_path);
+            end
+        end
+    end
+
+    %% 5. Single Grain Clustered Analysis (Other grain remains in gray context)
+    grain_plot_configs = {};
+    if opt_plot.plot_grain1
+        grain_plot_configs{end+1} = struct('name', 'Grain1', 'id', g1_id, 'mask', mask_g1, 'bundles', {bundles_g1}, 'leftovers', leftover_g1, 'sSLocal', sSLocal_1, 'ori', ori1, 'cx', cx1, 'cy', cy1);
+    end
+    if opt_plot.plot_grain2
+        grain_plot_configs{end+1} = struct('name', 'Grain2', 'id', g2_id, 'mask', mask_g2, 'bundles', {bundles_g2}, 'leftovers', leftover_g2, 'sSLocal', sSLocal_2, 'ori', ori2, 'cx', cx2, 'cy', cy2);
+    end
+
+    for g_idx = 1:length(grain_plot_configs)
+        cfg = grain_plot_configs{g_idx};
+        n_bundles_g = length(cfg.bundles);
+        num_subplots_g = n_bundles_g + 1;
+
+        % Build single-grain activity fields (other grain pixels remain NaN -> gray background)
+        grain_activities = nan(length(ebsdID), num_subplots_g);
+        for t_i = 1:num_subplots_g
+            if t_i <= n_bundles_g
+                act_g = zeros(length(ebsdID), 1);
+                for mem = 1:length(cfg.bundles{t_i})
+                    act_g = act_g + abs(ebsdID.prop.slipIDcor(:, cfg.bundles{t_i}(mem)));
+                end
+            else
+                act_g = zeros(length(ebsdID), 1);
+                for mem = 1:length(cfg.leftovers)
+                    act_g = act_g + abs(ebsdID.prop.slipIDcor(:, cfg.leftovers(mem)));
                 end
             end
-            
-            mtexColorbar('title', 'Combined Slip Activity (\gamma)');
-            
-            % Export
-            clim_str = sprintf('clim_%.3f_%.3f', current_clim(1), current_clim(2));
-            clim_str = strrep(clim_str, '.', 'p');
-            fig_path = fullfile(plotDir, sprintf('Combined_Bicrystal_SSLIP_%s_%s_%s.jpg', current_prefix, clim_str, q_str));
-            exportScaledFigure(fig, fig_path, 'target_px', 3000, 'noDateString');
-            close(fig);
-            
-            fprintf('Exported plot to: %s\n', fig_path);
+            grain_activities(cfg.mask(:), t_i) = act_g(cfg.mask(:));
+        end
+
+        for c_idx = 1:length(clims_to_plot)
+            current_clim = clims_to_plot{c_idx};
+
+            for plot_quivers = quiver_modes
+                if plot_quivers
+                    q_str = 'withQuivers';
+                else
+                    q_str = 'noQuivers';
+                end
+
+                fig = figure('Name', sprintf('SSLIP %s Analysis - %s (clim: %.3f-%.3f) [%s]', cfg.name, current_prefix, current_clim(1), current_clim(2), q_str), 'Visible', 'off');
+                newMtexFigure('layout', [1, num_subplots_g], 'figSize', 'huge');
+
+                for t_i = 1:num_subplots_g
+                    nextAxis;
+                    plotSSLIP_Context(opt_ctx);
+
+                    hold on;
+                    plot(ebsdID, grain_activities(:, t_i), 'micronbar', 'off');
+                    mtexColorMap parula; try mtexColorMap viridis; catch, end;
+                    setColorRange(current_clim);
+
+                    % Redraw grain boundaries ON TOP
+                    hold on;
+                    plot(opt_ctx.grains.boundary, 'linecolor', opt_ctx.grainLineColor, 'linewidth', opt_ctx.grainLineWidth);
+
+                    if t_i <= n_bundles_g
+                        rep_g = cfg.bundles{t_i}(1);
+
+                        if plot_quivers
+                            quiver_scale = opt_bundle.quiver_length_factor * (max(ebsdID.x,[],'all') - min(ebsdID.x,[],'all'));
+                            quiver(cfg.cx, cfg.cy, quiver_scale * cfg.sSLocal(rep_g).trace.x, 0.5*quiver_scale * cfg.sSLocal(rep_g).trace.y, 'color', 'r', 'linewidth', 5, 'ShowArrowHead', 'off');
+                            quiver(cfg.cx, cfg.cy, quiver_scale * cfg.sSLocal(rep_g).b.normalize.x, quiver_scale * cfg.sSLocal(rep_g).b.normalize.y, 'color', 'r', 'linewidth', 2);
+                        end
+
+                        stress = stressTensor.uniaxial(xvector);
+                        sf_g = abs(cfg.sSLocal(rep_g).SchmidFactor(stress));
+
+                        sys_rep_g = inv(cfg.ori) * cfg.sSLocal(rep_g);
+                        ng = round(sys_rep_g.n); bg = round(sys_rep_g.b, 'uvw');
+                        sys_str_g = sprintf('(%.0f %.0f %.0f)[%.0f %.0f %.0f]', ng.h, ng.k, ng.l, bg.u, bg.v, bg.w);
+
+                        title_str = sprintf('[Bundle %d]\n%s (%d sys)\n%s | SF=%.2f', ...
+                            t_i, cfg.name, length(cfg.bundles{t_i}), sys_str_g, sf_g);
+                        title(title_str, 'Interpreter', 'none');
+                    else
+                        title(sprintf('[Leftover Activity]\n%s: %d sys', cfg.name, length(cfg.leftovers)));
+                    end
+                end
+
+                mtexColorbar('title', 'Combined Slip Activity (\gamma)');
+
+                % Export
+                clim_str = sprintf('clim_%.3f_%.3f', current_clim(1), current_clim(2));
+                clim_str = strrep(clim_str, '.', 'p');
+                fig_path = fullfile(plotDir, sprintf('SingleGrain_%s_SSLIP_%s_%s_%s.jpg', cfg.name, current_prefix, clim_str, q_str));
+                exportScaledFigure(fig, fig_path, 'target_px', 3000, 'noDateString');
+                close(fig);
+
+                fprintf('Exported single grain plot to: %s\n', fig_path);
+            end
         end
     end
 end

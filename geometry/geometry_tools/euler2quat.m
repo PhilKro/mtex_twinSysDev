@@ -51,6 +51,9 @@ end
 conventions = {'nfft','ZYZ','ABG','Matthies','Roe','Kocks','Bunge','ZXZ','Canova'};
 convention = get_flag(varargin,conventions,getMTEXpref('EulerAngleConvention'));
 
+if iscell(convention), convention = convention{1}; end
+if isstring(convention), convention = char(convention); end
+if isempty(convention), convention = 'Bunge'; end
 switch lower(convention)
 
   case {'matthies','nfft','zyz','abg'}

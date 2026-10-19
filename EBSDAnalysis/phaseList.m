@@ -105,11 +105,19 @@ classdef phaseList
       nc = numel(colorOrder);
       c = 1;
       
-      for ph = 1:numel(pL.phaseMap)
-        if isa(pL.CSList{ph},'symmetry') && isempty(pL.CSList{ph}.color)
-          pL.CSList{ph}.color = str2rgb(colorOrder{mod(c-1,nc)+1});
-          c = c+1;
-        end
+      if ~isempty(colorOrder)
+          for ph = 1:numel(pL.phaseMap)
+            if isa(pL.CSList{ph},'symmetry') && isempty(pL.CSList{ph}.color)
+              cs = pL.CSList{ph};
+              if iscell(colorOrder)
+                  cs.color = str2rgb(colorOrder{mod(c-1,numel(colorOrder))+1});
+              else
+                  cs.color = colorOrder(mod(c-1,size(colorOrder,1))+1, :);
+              end
+              pL.CSList{ph} = cs;
+              c = c+1;
+            end
+          end
       end
       
     end

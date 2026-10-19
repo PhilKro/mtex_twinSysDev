@@ -107,6 +107,11 @@ try
   CSList = get_option(varargin,'CS',CSList);
   ebsd = EBSD(pos,rot,phase,CSList,opt,varargin{:});
 
-catch
+catch ME
+  % If an internal MTEX error occurred (e.g. brace indexing or property validation),
+  % print the actual error and stack trace so the user can debug it!
+  disp(ME.getReport());
+  
+  % Then show the generic interface error
   interfaceError(fname)
 end

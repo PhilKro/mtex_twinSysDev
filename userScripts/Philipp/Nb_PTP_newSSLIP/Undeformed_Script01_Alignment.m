@@ -584,5 +584,5 @@ minSize = 1000;
 newEBSD(grains(grains.numPixel <= minSize)) = 'notIndexed';
 [grains, newEBSD.grainId] = calcGrains(newEBSD, 'minPixel', minSize, 'angle', grainThresh);
 
-save(finalOutName, 'newEBSD', 'originalEBSD', 'grains')
+save(finalOutName, 'newEBSD', 'originalEBSD', 'grains', 'options')
 fprintf('Saved as: %s\n', finalOutName)

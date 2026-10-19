@@ -1,4 +1,4 @@
-N:\Vol1-Th\Analytik\Personal\Philipp Vol1 Analy Personal\Titanium\Ti_cAxis_PTP_2\DIC exported data\Processing_subset=21_step=5%% Re_PTP3_prettyIPF_loop.m
+% N:\Vol1-Th\Analytik\Personal\Philipp Vol1 Analy Personal\Titanium\Ti_cAxis_PTP_2\DIC exported data\Processing_subset=21_step=5%% Re_PTP3_prettyIPF_loop.m
 % Script to loop over Re_PTP_3 .ang files and generate pretty IPF Y maps
 % overlaid on a tunable greyscale Confidence Index (CI) background.
 
@@ -110,7 +110,7 @@ for i = 1:length(angFiles)
     ipf.inversePoleFigureDirection = yvector;
     
     fig = figure('Name', currentFile, 'Visible', 'off');
-    plot(ebsd, cibw, 'micronbar', 'on');
+    plot(ebsd, cibw, 'micronbar', 'off');
     hold on;
 
     colors = ipf.orientation2color(ebsd('indexed').orientations);
@@ -119,102 +119,196 @@ for i = 1:length(angFiles)
     title(['IPF Y - ', baseName], 'Interpreter', 'none');
     
     % --- Export Figure ---
-    out_name = fullfile(outDir, sprintf('%s_Y_IPF_TunedCI.jpg', baseName)); %sprintf('%s_Y_IPF_TunedCI.jpg', baseName)
+    out_name = fullfile(outDir, sprintf('%s_Y_IPF_TunedCI_noMicron.jpg', baseName)); %sprintf('%s_Y_IPF_TunedCI.jpg', baseName)
     exportScaledFigure(gcf, out_name, 'noDateString');
     close(fig);
     
     fprintf('  -> Saved plot to %s\n', out_name);
     
-    % --- Twin Variant Identification ---
+    % --- Twin Network Analysis ---
     % Project orientations to Fundamental Region
     reforientation = orientation.byEuler(0*degree, 0*degree, 0*degree, CS);
-    ebsd.orientations = ebsd.orientations.project2FundamentalRegion(reforientation);
+    ebsd('indexed').orientations = ebsd('indexed').orientations.project2FundamentalRegion(reforientation);
     
     % Reconstruct Grains
     [grains, ebsd.grainId] = calcGrains(ebsd, 'angle', 5*degree, 'minPixel', 5);
     [grains, ebsd.grainId] = calcGrains(ebsd, 'angle', 5*degree, 'minPixel', 5);
-    % grains = smooth(grains, 5);
-
-    % Identify Parent Grain & Twin Systems
-    [~, parentId] = max(grains.numPixel);
-    parentGrain = grains(parentId);
-    parentGrains = grains(angle(parentGrain.meanOrientation, grains.meanOrientation) < 8*degree);
-
-    tS_1121 = twinSystem.hexagonal_1121_0001(CS);
-    tS_sym = tS_1121.symmetrise;
-
-    % Calculate primary and secondary variants
-    primaryTwin = parentGrain.meanOrientation * tS_sym;
-    secondTwin = primaryTwin * tS_sym;
-
-    primary_twin_oris = primaryTwin.orientation;
-    secondary_twin_oris = secondTwin.orientation;
+    grains = smooth(grains, 1);
     
-    tolerance = 13 * degree;
-    isPrimary = false(length(grains), 1);
-    isSecondary = false(length(grains), 1);
-    primaryVariantId = zeros(length(grains), 1);
-    secondaryVariantId = zeros(length(grains), 2);
+    % Extract only internal boundaries between indexed grains
+    gB = grains.boundary(CS.mineral, CS.mineral);
 
-    for j = 1:length(grains)
-        if any(grains(j).id == parentGrains.id), continue; end
-        [minAngle, bestFit] = min(angle(grains(j).meanOrientation, primary_twin_oris));
-        if minAngle < tolerance
-            isPrimary(j) = true;
-            primaryVariantId(j) = primaryTwin(bestFit).variantId;
-        end
+    % Define {11-21} Twin System for Re
+    tS_1121 = twinSystem.hexagonal_1121(CS);
+
+    % Initialize twinNetwork with maxGen = 1
+    network = twinNetwork(grains, gB, tS_1121, ebsd('indexed'), 'thresh', 8*degree, 'maxGen', 1);
+
+    % Step 1: Building Initial Topology
+    disp('    Step 1: Building Initial Topology...');
+    network.buildInitialGraph('maxGen', 1);
+    if ~isempty(network.Graph) && numedges(network.Graph) > 0
+        network.plotGraph(network.Graph);
+        figG = gcf;
+        title(sprintf('[%s] Step 1: Initial Raw Topology', baseName), 'Interpreter', 'none');
+        exportScaledFigure(figG, fullfile(outDir, sprintf('%s_01_Raw_Topology.png', baseName)), 'noDateString');
+        close(figG);
     end
 
-    for j = 1:length(grains)
-        if any(grains(j).id == parentGrains.id) || isPrimary(j), continue; end
-        [minAngle, bestFit] = min(angle(grains(j).meanOrientation, secondary_twin_oris));
-        if minAngle < tolerance
-            isSecondary(j) = true;
-            secondaryVariantId(j,:) = [secondTwin(bestFit).parent.variantId, secondTwin(bestFit).variantId];
-        end
+    % Step 2: Extracting Spanning Tree
+    disp('    Step 2: Extracting Spanning Tree...');
+    network.extractSpanningTree();
+    if ~isempty(network.mstGraph) && numedges(network.mstGraph) > 0
+        network.plotGraph(network.mstGraph);
+        figMST = gcf;
+        title(sprintf('[%s] Step 2: Minimum Spanning Tree', baseName), 'Interpreter', 'none');
+        exportScaledFigure(figMST, fullfile(outDir, sprintf('%s_02_Minimum_Spanning_Tree.png', baseName)), 'noDateString');
+        close(figMST);
     end
 
-    % --- Plotting Twin Map ---
-    variant_alpha = 1;
-    fig_twins = figure('Name', ['Twin Variants - ' currentFile], 'Visible', 'off');
-    % plot(ebsd, cibw, 'micronbar', 'on');
+    % Step 3: Resolving Node States and Variants
+    disp('    Step 3: Resolving Node States and Variants...');
+    network.resolveNodeStates();
+    if ~isempty(network.mstGraph) && numedges(network.mstGraph) > 0
+        network.plotGraph(network.mstGraph);
+        figRes = gcf;
+        title(sprintf('[%s] Step 3: MST after FZ Propagation', baseName), 'Interpreter', 'none');
+        exportScaledFigure(figRes, fullfile(outDir, sprintf('%s_03_Resolved_Node_States.png', baseName)), 'noDateString');
+        close(figRes);
+    end
+
+    % Step 4: Pruning and Rewiring Outliers
+    disp('    Step 4: Pruning and Rewiring Outliers...');
+    network.pruneAndRewireOutliers('outlierMode', 'theoretical', 'maxErrThreshold', 25*degree, 'debug', true, 'rejectGenIncrease', true);
+    if ~isempty(network.mstGraph) && numedges(network.mstGraph) > 0
+        network.plotGraph(network.mstGraph);
+        figPrune = gcf;
+        title(sprintf('[%s] Step 4: Pruned Graph Topology', baseName), 'Interpreter', 'none');
+        exportScaledFigure(figPrune, fullfile(outDir, sprintf('%s_04_Pruned_Rewired.png', baseName)), 'noDateString');
+        close(figPrune);
+    end
+
+    % Step 5: Reducing to Quotient Graph
+    disp('    Step 5: Reducing to Quotient Graph...');
+    network.reduceToQuotient();
+    if ~isempty(network.QuotientGraph) && numedges(network.QuotientGraph) > 0
+        network.plotGraph(network.QuotientGraph, 'noGrainsBG', true);
+        figQ = gcf;
+        title(sprintf('[%s] Step 5: Final Quotient Graph', baseName), 'Interpreter', 'none');
+        exportScaledFigure(figQ, fullfile(outDir, sprintf('%s_05_Quotient_Graph.png', baseName)), 'noDateString');
+        close(figQ);
+    end
+
+    % Step 6: Plotting grains with twin generation assignment (with text labels)
+    disp('    Step 6: Plotting grains with twin generation assignment...');
+    network.plot('twinsOnly', false, 'noText', false);
+    figGen = gcf;
+    title(sprintf('[%s] Twin Generations & Network Map', baseName), 'Interpreter', 'none');
+    out_name_twins = fullfile(outDir, sprintf('%s_TwinVariants_twinNetwork.jpg', baseName));
+    exportScaledFigure(figGen, out_name_twins, 'noDateString');
+    close(figGen);
+    fprintf('  -> Saved twin network plot to %s\n', out_name_twins);
+
+    % Step 7: Plotting grains with twin generation assignment (without text labels)
+    disp('    Step 7: Plotting grains with twin generation assignment without text...');
+    network.plot('twinsOnly', false, 'noText', true, 'lineWidth', 2);
+    figGenNoText = gcf;
+    title(sprintf('[%s] Twin Generations & Network Map (No Text)', baseName), 'Interpreter', 'none');
+    out_name_notext = fullfile(outDir, sprintf('%s_TwinVariants_twinNetwork_noText.jpg', baseName));
+    exportScaledFigure(figGenNoText, out_name_notext, 'noDateString');
+    close(figGenNoText);
+    fprintf('  -> Saved twin network (no text) plot to %s\n', out_name_notext);
+
+    % % --- (Legacy) Twin Variant Identification ---
+    % % Project orientations to Fundamental Region
+    % reforientation = orientation.byEuler(0*degree, 0*degree, 0*degree, CS);
+    % ebsd.orientations = ebsd.orientations.project2FundamentalRegion(reforientation);
+    % 
+    % % Reconstruct Grains
+    % [grains, ebsd.grainId] = calcGrains(ebsd, 'angle', 5*degree, 'minPixel', 5);
+    % [grains, ebsd.grainId] = calcGrains(ebsd, 'angle', 5*degree, 'minPixel', 5);
+    % % grains = smooth(grains, 5);
+    % 
+    % % Identify Parent Grain & Twin Systems
+    % [~, parentId] = max(grains.numPixel);
+    % parentGrain = grains(parentId);
+    % parentGrains = grains(angle(parentGrain.meanOrientation, grains.meanOrientation) < 8*degree);
+    % 
+    % tS_1121 = twinSystem.hexagonal_1121(CS);
+    % tS_sym = tS_1121.symmetrise;
+    % 
+    % % Calculate primary and secondary variants
+    % primaryTwin = parentGrain.meanOrientation * tS_sym;
+    % secondTwin = primaryTwin * tS_sym;
+    % 
+    % primary_twin_oris = primaryTwin.orientation;
+    % secondary_twin_oris = secondTwin.orientation;
+    % 
+    % tolerance = 13 * degree;
+    % isPrimary = false(length(grains), 1);
+    % isSecondary = false(length(grains), 1);
+    % primaryVariantId = zeros(length(grains), 1);
+    % secondaryVariantId = zeros(length(grains), 2);
+    % 
+    % for j = 1:length(grains)
+    %     if any(grains(j).id == parentGrains.id), continue; end
+    %     [minAngle, bestFit] = min(angle(grains(j).meanOrientation, primary_twin_oris));
+    %     if minAngle < tolerance
+    %         isPrimary(j) = true;
+    %         primaryVariantId(j) = primaryTwin(bestFit).variantId;
+    %     end
+    % end
+    % 
+    % for j = 1:length(grains)
+    %     if any(grains(j).id == parentGrains.id) || isPrimary(j), continue; end
+    %     [minAngle, bestFit] = min(angle(grains(j).meanOrientation, secondary_twin_oris));
+    %     if minAngle < tolerance
+    %         isSecondary(j) = true;
+    %         secondaryVariantId(j,:) = [secondTwin(bestFit).parent.variantId, secondTwin(bestFit).variantId];
+    %     end
+    % end
+    % 
+    % % --- Plotting Twin Map ---
+    % variant_alpha = 1;
+    % fig_twins = figure('Name', ['Twin Variants - ' currentFile], 'Visible', 'off');
+    % % plot(ebsd, cibw, 'micronbar', 'on');
+    % % hold on;
+    % 
+    % plot(parentGrains, 'facecolor', [0.8 0.8 0.8], 'facealpha', variant_alpha);
+    % 
+    % varColors = lines(length(tS_sym));
+    % 
+    % primaryGrains = grains(isPrimary);
+    % varIds = primaryVariantId(isPrimary);
+    % uniqueVars = unique(varIds);
+    % for v_idx = 1:length(uniqueVars)
+    %     variant = uniqueVars(v_idx);
+    %     if variant == 0, continue; end
+    %     g_var = primaryGrains(varIds == variant);
+    %     hold on;
+    %     plot(g_var, 'facecolor', varColors(variant,:), 'facealpha', variant_alpha);
+    % end
+    % 
+    % secondaryGrains = grains(isSecondary);
+    % if ~isempty(secondaryGrains)
+    %     hold on
+    %     plot(secondaryGrains, 'facecolor', 'w', 'facealpha', variant_alpha);
+    %     secIds = secondaryVariantId(isSecondary, :);
+    %     %labels = arrayfun(@(x) sprintf('T%d,%d', secIds(x,1), secIds(x,2)), 1:size(secIds,1), 'UniformOutput', false);
+    %     %text(secondaryGrains, labels, 'HorizontalAlignment', 'center');
+    % end
+    % 
     % hold on;
-
-    plot(parentGrains, 'facecolor', [0.8 0.8 0.8], 'facealpha', variant_alpha);
-    
-    varColors = lines(length(tS_sym));
-
-    primaryGrains = grains(isPrimary);
-    varIds = primaryVariantId(isPrimary);
-    uniqueVars = unique(varIds);
-    for v_idx = 1:length(uniqueVars)
-        variant = uniqueVars(v_idx);
-        if variant == 0, continue; end
-        g_var = primaryGrains(varIds == variant);
-        hold on;
-        plot(g_var, 'facecolor', varColors(variant,:), 'facealpha', variant_alpha);
-    end
-
-    secondaryGrains = grains(isSecondary);
-    if ~isempty(secondaryGrains)
-        hold on
-        plot(secondaryGrains, 'facecolor', 'w', 'facealpha', variant_alpha);
-        secIds = secondaryVariantId(isSecondary, :);
-        %labels = arrayfun(@(x) sprintf('T%d,%d', secIds(x,1), secIds(x,2)), 1:size(secIds,1), 'UniformOutput', false);
-        %text(secondaryGrains, labels, 'HorizontalAlignment', 'center');
-    end
-
-    hold on;
-    plot(grains.boundary, 'linewidth', 1.5, 'linecolor', 'k');
-    
-    title(['Twin Variants - ', baseName], 'Interpreter', 'none');
-    
-    % --- Export Twin Map Figure ---
-    out_name_twins = fullfile(outDir, sprintf('%s_TwinVariants_TunedCI.jpg', baseName));
-    exportScaledFigure(fig_twins, out_name_twins, 'noDateString');
-    close(fig_twins);
-    
-    fprintf('  -> Saved twin variants plot to %s\n', out_name_twins);
+    % plot(grains.boundary, 'linewidth', 1.5, 'linecolor', 'k');
+    % 
+    % title(['Twin Variants - ', baseName], 'Interpreter', 'none');
+    % 
+    % % --- Export Twin Map Figure ---
+    % out_name_twins = fullfile(outDir, sprintf('%s_TwinVariants_TunedCI.jpg', baseName));
+    % exportScaledFigure(fig_twins, out_name_twins, 'noDateString');
+    % close(fig_twins);
+    % 
+    % fprintf('  -> Saved twin variants plot to %s\n', out_name_twins);
 end
 
 fprintf('\nFinished generating pretty IPF plots for Re_PTP_3!\n');
